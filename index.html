@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>MarkScript Viewer</title>
+<style>
+  .copy-box { background: #eee; padding: 5px; display: inline-block; margin: 5px 0; }
+  .copy-box button { margin-left: 10px; }
+</style>
+</head>
+<body>
+<textarea id="input" rows="10" cols="50" placeholder="ここにMarkScriptを書いてね"></textarea><br />
+<button id="run">変換して表示</button>
+
+<div id="output" style="margin-top:20px; border:1px solid #ccc; padding:10px;"></div>
+
+<script>
+  function parseMarkScript(text) {
+    const lines = text.split(/\r?\n/);
+    let html = '';
+    lines.forEach(line => {
+      if(line.startsWith('タイトル ')) {
+        html += `<h1>${line.slice(4).trim()}</h1>`;
+      } else if(line.startsWith('大 ')) {
+        html += `<h3>${line.slice(2).trim()}</h3>`;
+      } else if(line.startsWith('小 ')) {
+        html += `<small>${line.slice(2).trim()}</small>`;
+      } else if(line.startsWith('コピー ')) {
+        const content = line.slice(3).trim();
+        html += `<div class="copy-box">${content} <button onclick="navigator.clipboard.writeText('${content}')">コピー</button></div>`;
+      } else if(line.startsWith('埋め ')) {
+        const parts = line.split(' ');
+        const url = parts[1];
+        const text = parts.slice(2).join(' ');
+        html += `<a href="${url}" target="_blank">${text}</a>`;
+      } else if(line.trim() === '') {
+        html += '<br />';
+      } else {
+        html += `<p>${line}</p>`;
+      }
+    });
+    return html;
+  }
+
+  document.getElementById('run').addEventListener('click', () => {
+    const input = document.getElementById('input').value;
+    const output = parseMarkScript(input);
+    document.getElementById('output').innerHTML = output;
+  });
+</script>
+</body>
+  </html>
