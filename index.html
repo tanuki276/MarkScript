@@ -167,7 +167,6 @@
   ・<code>タイトル </code>：大きな見出し（h1）<br />
   ・<code>大 </code>：中見出し（h3）<br />
   ・<code>小 </code>：補足情報（small）<br />
-  ・<code>コピー </code>：コピー可能なボックスを表示<br />
   ・<code>埋め URL テキスト</code>：リンクを作成<br />
   ・空行：改行<br />
   ・その他：普通の段落
@@ -203,10 +202,6 @@
       } else if (safeLine.startsWith('大 ')) {
         html += `<h3>${safeLine.slice(2).trim()}</h3>`;
       } else if (safeLine.startsWith('小 ')) {
-        html += `<small>${safeLine.slice(2).trim()}</small>`;
-      } else if (safeLine.startsWith('コピー ')) {
-        const content = safeLine.slice(3).trim();
-        // クリックイベントでコピー（シングルクォートのエスケープ忘れずに）
         html += `<div class="copy-box">${content}<button onclick="navigator.clipboard.writeText('${content.replace(/'/g, "\\'")}')">コピー</button></div>`;
       } else if (safeLine.startsWith('埋め ')) {
         const parts = safeLine.split(' ');
