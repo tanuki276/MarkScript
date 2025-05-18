@@ -4,17 +4,15 @@
 <meta charset="UTF-8" />
 <title>MarkScript Viewer</title>
 <style>
+  /* ライトモードの基本スタイル */
   body {
     font-family: sans-serif;
     background: #f9f9f9;
     padding: 20px;
     color: #333;
+    transition: background-color 0.3s, color 0.3s;
   }
-
-  h1 {
-    color: #444;
-  }
-
+  h1 { color: #444; }
   textarea {
     width: 100%;
     max-width: 800px;
@@ -25,8 +23,10 @@
     box-shadow: 1px 1px 5px rgba(0,0,0,0.05);
     font-size: 14px;
     resize: vertical;
+    background: white;
+    color: #333;
+    transition: background-color 0.3s, color 0.3s;
   }
-
   button {
     margin-top: 10px;
     padding: 10px 20px;
@@ -37,26 +37,25 @@
     border-radius: 6px;
     cursor: pointer;
     box-shadow: 1px 1px 5px rgba(0,0,0,0.1);
+    transition: background-color 0.3s;
   }
-
   button:hover {
     background-color: #367be3;
   }
-
   .copy-box {
     background: #eee;
     padding: 8px;
-    display: inline-block;
+    display: inline-flex; /* ここinline-block→inline-flexに */
+    align-items: center;  /* ボタンとテキストを横並び中央揃え */
     margin: 5px 0;
     border-radius: 5px;
   }
-
   .copy-box button {
     margin-left: 10px;
     padding: 4px 8px;
     font-size: 12px;
+    flex-shrink: 0;
   }
-
   #output {
     background: white;
     border: 1px solid #ccc;
@@ -65,8 +64,8 @@
     max-width: 800px;
     border-radius: 10px;
     box-shadow: 1px 1px 8px rgba(0,0,0,0.05);
+    transition: background-color 0.3s, color 0.3s;
   }
-
   #manual {
     background: #e9f5ff;
     padding: 15px;
@@ -74,13 +73,88 @@
     margin-bottom: 20px;
     max-width: 800px;
     border-radius: 8px;
+    transition: background-color 0.3s, color 0.3s;
   }
-
   #manual code {
     background: #dbeeff;
     padding: 2px 5px;
     border-radius: 4px;
     font-family: monospace;
+  }
+
+  /* ダークモード用クラス */
+  body.dark {
+    background: #121212;
+    color: #ddd;
+  }
+  body.dark h1 {
+    color: #eee;
+  }
+  body.dark textarea {
+    background: #222;
+    color: #eee;
+    border-color: #555;
+    box-shadow: none;
+  }
+  body.dark button {
+    background-color: #5a9bff;
+  }
+  body.dark button:hover {
+    background-color: #3f7dde;
+  }
+  body.dark .copy-box {
+    background: #333;
+  }
+  body.dark #output {
+    background: #222;
+    border-color: #555;
+    color: #ddd;
+  }
+  body.dark #manual {
+    background: #223344;
+    border-color: #5a9bff;
+    color: #ccc;
+  }
+
+  /* モード切替ボタン配置 */
+  #modeToggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background-color: #3f8efc;
+    color: white;
+    border-radius: 50px;
+    padding: 8px 15px;
+    font-weight: bold;
+    box-shadow: 1px 1px 8px rgba(0,0,0,0.15);
+    cursor: pointer;
+    z-index: 1000;
+    transition: background-color 0.3s;
+  }
+  #modeToggle:hover {
+    background-color: #367be3;
+  }
+
+  /* お問い合わせボタン */
+  #contactBtn {
+    margin-top: 15px;
+    background-color: #2ecc71;
+  }
+  #contactBtn:hover {
+    background-color: #27ae60;
+  }
+
+  /* レスポンシブ */
+  @media (max-width: 600px) {
+    textarea, #output, #manual {
+      max-width: 100%;
+    }
+    #modeToggle {
+      top: 10px;
+      right: 10px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
   }
 </style>
 </head>
@@ -101,8 +175,12 @@
 
 <textarea id="input" placeholder="ここにMarkScriptを書いてね"></textarea><br />
 <button id="run">変換して表示</button>
+<button id="contactBtn">お問い合わせ</button>
 
 <div id="output"></div>
+
+<!-- ダーク/ライト切替ボタン -->
+<div id="modeToggle">ダークモード</div>
 
 <script>
   function escapeHTML(str) {
@@ -128,7 +206,8 @@
         html += `<small>${safeLine.slice(2).trim()}</small>`;
       } else if (safeLine.startsWith('コピー ')) {
         const content = safeLine.slice(3).trim();
-        html += `<div class="copy-box">${content} <button onclick="navigator.clipboard.writeText('${content.replace(/'/g, "\\'")}')">コピー</button></div>`;
+        // クリックイベントでコピー（シングルクォートのエスケープ忘れずに）
+        html += `<div class="copy-box">${content}<button onclick="navigator.clipboard.writeText('${content.replace(/'/g, "\\'")}')">コピー</button></div>`;
       } else if (safeLine.startsWith('埋め ')) {
         const parts = safeLine.split(' ');
         const url = parts[1];
@@ -143,10 +222,27 @@
     return html;
   }
 
+  // 変換ボタンの処理
   document.getElementById('run').addEventListener('click', () => {
     const input = document.getElementById('input').value;
     const output = parseMarkScript(input);
     document.getElementById('output').innerHTML = output;
+  });
+
+  // お問い合わせボタンのリンク処理
+  document.getElementById('contactBtn').addEventListener('click', () => {
+    window.open('https://discord.gg/vq6pqgXj', '_blank');
+  });
+
+  // ダークモード切替処理
+  const modeToggle = document.getElementById('modeToggle');
+  modeToggle.addEventListener('click', () => {
+    document.body.classList.toggle('dark');
+    if(document.body.classList.contains('dark')) {
+      modeToggle.textContent = 'ライトモード';
+    } else {
+      modeToggle.textContent = 'ダークモード';
+    }
   });
 </script>
 
