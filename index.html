@@ -4,39 +4,140 @@
 <meta charset="UTF-8" />
 <title>MarkScript Viewer</title>
 <style>
-  .copy-box { background: #eee; padding: 5px; display: inline-block; margin: 5px 0; }
-  .copy-box button { margin-left: 10px; }
+  body {
+    font-family: sans-serif;
+    background: #f9f9f9;
+    padding: 20px;
+    color: #333;
+  }
+
+  h1 {
+    color: #444;
+  }
+
+  textarea {
+    width: 100%;
+    max-width: 800px;
+    height: 150px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    box-shadow: 1px 1px 5px rgba(0,0,0,0.05);
+    font-size: 14px;
+    resize: vertical;
+  }
+
+  button {
+    margin-top: 10px;
+    padding: 10px 20px;
+    font-size: 14px;
+    border: none;
+    background-color: #3f8efc;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    box-shadow: 1px 1px 5px rgba(0,0,0,0.1);
+  }
+
+  button:hover {
+    background-color: #367be3;
+  }
+
+  .copy-box {
+    background: #eee;
+    padding: 8px;
+    display: inline-block;
+    margin: 5px 0;
+    border-radius: 5px;
+  }
+
+  .copy-box button {
+    margin-left: 10px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  #output {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 15px;
+    margin-top: 20px;
+    max-width: 800px;
+    border-radius: 10px;
+    box-shadow: 1px 1px 8px rgba(0,0,0,0.05);
+  }
+
+  #manual {
+    background: #e9f5ff;
+    padding: 15px;
+    border-left: 5px solid #3f8efc;
+    margin-bottom: 20px;
+    max-width: 800px;
+    border-radius: 8px;
+  }
+
+  #manual code {
+    background: #dbeeff;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
 </style>
 </head>
 <body>
-<textarea id="input" rows="10" cols="50" placeholder="ここにMarkScriptを書いてね"></textarea><br />
+
+<h1>MarkScript Viewer</h1>
+
+<div id="manual">
+  <strong>■ MarkScriptマニュアル：</strong><br />
+  ・<code>タイトル </code>：大きな見出し（h1）<br />
+  ・<code>大 </code>：中見出し（h3）<br />
+  ・<code>小 </code>：補足情報（small）<br />
+  ・<code>コピー </code>：コピー可能なボックスを表示<br />
+  ・<code>埋め URL テキスト</code>：リンクを作成<br />
+  ・空行：改行<br />
+  ・その他：普通の段落
+</div>
+
+<textarea id="input" placeholder="ここにMarkScriptを書いてね"></textarea><br />
 <button id="run">変換して表示</button>
 
-<div id="output" style="margin-top:20px; border:1px solid #ccc; padding:10px;"></div>
+<div id="output"></div>
 
 <script>
+  function escapeHTML(str) {
+    return str.replace(/[&<>"']/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[tag]));
+  }
+
   function parseMarkScript(text) {
     const lines = text.split(/\r?\n/);
     let html = '';
     lines.forEach(line => {
-      if(line.startsWith('タイトル ')) {
-        html += `<h1>${line.slice(4).trim()}</h1>`;
-      } else if(line.startsWith('大 ')) {
-        html += `<h3>${line.slice(2).trim()}</h3>`;
-      } else if(line.startsWith('小 ')) {
-        html += `<small>${line.slice(2).trim()}</small>`;
-      } else if(line.startsWith('コピー ')) {
-        const content = line.slice(3).trim();
-        html += `<div class="copy-box">${content} <button onclick="navigator.clipboard.writeText('${content}')">コピー</button></div>`;
-      } else if(line.startsWith('埋め ')) {
-        const parts = line.split(' ');
+      const safeLine = escapeHTML(line);
+      if (safeLine.startsWith('タイトル ')) {
+        html += `<h1>${safeLine.slice(4).trim()}</h1>`;
+      } else if (safeLine.startsWith('大 ')) {
+        html += `<h3>${safeLine.slice(2).trim()}</h3>`;
+      } else if (safeLine.startsWith('小 ')) {
+        html += `<small>${safeLine.slice(2).trim()}</small>`;
+      } else if (safeLine.startsWith('コピー ')) {
+        const content = safeLine.slice(3).trim();
+        html += `<div class="copy-box">${content} <button onclick="navigator.clipboard.writeText('${content.replace(/'/g, "\\'")}')">コピー</button></div>`;
+      } else if (safeLine.startsWith('埋め ')) {
+        const parts = safeLine.split(' ');
         const url = parts[1];
         const text = parts.slice(2).join(' ');
         html += `<a href="${url}" target="_blank">${text}</a>`;
-      } else if(line.trim() === '') {
+      } else if (safeLine.trim() === '') {
         html += '<br />';
       } else {
-        html += `<p>${line}</p>`;
+        html += `<p>${safeLine}</p>`;
       }
     });
     return html;
@@ -48,5 +149,6 @@
     document.getElementById('output').innerHTML = output;
   });
 </script>
+
 </body>
-  </html>
+</html>
