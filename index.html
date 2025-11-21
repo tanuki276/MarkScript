@@ -10,27 +10,32 @@
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: #f9f9f9; padding: 20px; color: #222; transition: background-color .25s, color .25s; }
   h1 { color: #444; }
   textarea { width:100%; max-width:800px; height:200px; padding:10px; border-radius:8px; border:1px solid #ccc; box-shadow:1px 1px 5px rgba(0,0,0,0.05); font-size:14px; resize:vertical; background:white; color:#222; }
-  
+
   /* コントロールパネル */
   .controls { max-width: 800px; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
   .controls input[type="text"] { flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; }
   .controls button { padding:10px 20px; font-size:14px; border:none; background:#3f8efc; color:white; border-radius:6px; cursor:pointer; white-space: nowrap; }
   .controls button:disabled { opacity:.6; cursor:not-allowed; }
-  
+
   /* プレビューエリア */
   .copy-box { background:#eee; padding:8px; display:inline-flex; align-items:center; margin:5px 0; border-radius:5px; }
   .copy-box button { margin-left:10px; padding:4px 8px; font-size:12px; }
   #output { background:white; border:1px solid #ccc; padding:15px; margin-top:20px; max-width:800px; border-radius:10px; }
-  
+
   /* マニュアル */
   #manual { background:#e9f5ff; padding:15px; border-left:5px solid #3f8efc; margin-bottom:20px; max-width:800px; border-radius:8px; font-size: 0.9em; }
   #manual hr { margin: 8px 0; }
   #modeToggle { position:fixed; top:20px; right:20px; background:#3f8efc; color:#fff; border-radius:50px; padding:8px 15px; font-weight:bold; cursor:pointer; z-index:1000; }
-  
+
   /* 画像引用のプレビュー用スタイル */
   #output img { max-width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 5px; }
   #output figure { margin: 0; }
   #output figcaption { font-size: 0.9em; color: #666; text-align: center; margin-top: 5px; }
+  
+  /* 枠文字のプレビュー用スタイル */
+  .bordered-text { border: 2px solid; padding: 5px 10px; display: inline-block; border-radius: 5px; margin: 5px 0; }
+  .small-text { font-size: smaller; } /* 小文字 */
+
 
   /* ダークモードスタイル */
   body.dark { background:#121212; color:#ddd; }
@@ -38,7 +43,8 @@
   body.dark #output { background:#222; border-color:#444; }
   body.dark .copy-box { background: #333; }
   body.dark #manual { background: #1a2233; border-color: #3f8efc; color: #eee; }
-  
+  body.dark .bordered-text { color: inherit; background: transparent; }
+
   @media (max-width:600px) { textarea,#output,#manual,.controls { max-width:100%; } #modeToggle { top:10px; right:10px; padding:6px 12px; } }
 </style>
 </head>
@@ -49,12 +55,14 @@
   <strong>■ MarkScript（拡張機能）：</strong><br />
   ・<code>タイトル </code>：大見出し（h1）<br />
   ・<code>大 </code>：中見出し（h3）<br />
-  ・<code>小 </code>：コピー付テキスト（クリップボード）<br />
+  ・**<code>小 テキスト</code>**：文字を小さく表示<br />
+  ・**<code>コピー テキスト</code>**：コピーボタン付きのテキスト<br />
   ・<code>埋め URL テキスト</code>：リンク（http/https のみ）<br />
   <hr>
-  ・**<code>背景 (色名/HEX)</code>**：コンテンツの背景色を設定（この行はコンテンツに出力されない。最初の行のみ有効）<br />
+  ・**<code>背景 (色名/HEX)</code>**：コンテンツの背景色を設定（最初の行のみ有効）<br />
   ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け<br />
-  ・**<code>画像 URL 代替テキスト</code>**：画像を引用表示<br />
+  ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける<br />
+  ・**<code>引用 URL</code>**：画像を引用表示<br />
   ・空行：改行<br />
   ・その他：通常の段落
 </div>
@@ -64,8 +72,8 @@
 <div class="controls">
     <button id="run">変換してプレビュー</button>
     <button id="contactBtn">お問い合わせ</button>
-    
-    <input type="text" id="publishPath" placeholder="公開パス (例: mypage/index.html)">
+
+    <input type="text" id="publishPath" placeholder="公開パス (例: site/mypage.html)">
     <button id="publishBtn">自動公開を実行</button>
 </div>
 
@@ -88,6 +96,18 @@
     ALLOWED_URL_PROTOCOLS: ['http:', 'https:']
   };
 
+  const COLOR_MAP = {
+      '赤': 'red',
+      '青': 'blue',
+      '緑': 'green',
+      '黄': 'yellow',
+      '黒': 'black',
+      '白': 'white',
+      'グレー': 'gray',
+      '紫': 'purple',
+      'オレンジ': 'orange',
+  };
+
   const submitTimestamps = [];
   let lastClick = 0;
 
@@ -98,13 +118,13 @@
   const publishBtn = document.getElementById('publishBtn');
   const publishPathEl = document.getElementById('publishPath');
   const modeToggle = document.getElementById('modeToggle');
-  
+
   // --- ユーティリティ関数群 ---
-  
+
   function appendTextNode(parent, text) {
     parent.appendChild(document.createTextNode(text));
   }
-  
+
   function validateAndNormalizeUrl(raw) {
     try {
       const cleaned = raw.trim();
@@ -118,9 +138,22 @@
     }
   }
 
-  function isValidColor(color) {
-      if (!color) return false;
-      return /^#([0-9A-F]{3}){1,2}$/i.test(color) || /^[a-z]+$/.test(color);
+  function normalizeColor(input) {
+      if (!input) return null;
+      const lower = input.toLowerCase();
+      // 1. 日本語の色名マップ
+      if (COLOR_MAP[input]) {
+          return COLOR_MAP[input];
+      }
+      // 2. HEXコード
+      if (/^#([0-9A-F]{3}){1,2}$/i.test(input)) {
+          return input;
+      }
+      // 3. CSSの予約語（例: teal, lightgray）
+      if (/^[a-z]+$/.test(lower)) {
+          return lower;
+      }
+      return null;
   }
 
   async function writeToClipboard(text) {
@@ -155,6 +188,14 @@
     appendTextNode(p, text);
     return p;
   }
+  
+  function createSmallText(text) {
+    const p = document.createElement('p');
+    p.className = 'small-text';
+    appendTextNode(p, text);
+    return p;
+  }
+
 
   function createCopyBox(content) {
     const wrapper = document.createElement('div');
@@ -190,13 +231,13 @@
     appendTextNode(a, text || url);
     return a;
   }
-  
+
   // --- メインパーサー ---
 
   function parseMarkScriptToNodes(text) {
     const nodes = document.createDocumentFragment();
     const lines = text.split(/\r?\n/).slice(0, CONFIG.MAX_LINES);
-    let isFirstLine = true; // 背景色チェック用
+    let isFirstLine = true; 
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i];
@@ -204,12 +245,12 @@
       if (line.length > CONFIG.MAX_LINE_CHARS) {
         line = line.slice(0, CONFIG.MAX_LINE_CHARS) + '…';
       }
-      
-      // 1. 背景 (プレビューでは影響を与えないが、行を消費する)
+
+      // 1. 背景 (サーバー側でのみ適用される設定行)
       if (isFirstLine && line.startsWith('背景 ')) {
-          // プレビュー表示には影響を与えないが、サーバー側で処理される
-          // 代わりに、この行が処理されたことを示すノードを追加
-          const p = createParagraph(`[設定行] 背景色が "${line.slice(3).trim().split(/\s+/)[0]}" に設定されました (サーバー側でのみ適用)`);
+          const color = line.slice(3).trim().split(/\s+/)[0];
+          const validColor = normalizeColor(color);
+          const p = createParagraph(`[設定行] 背景色が "${validColor || color}" に設定されました (プレビュー無効)`);
           p.style.opacity = 0.6;
           nodes.appendChild(p);
           isFirstLine = false;
@@ -236,62 +277,79 @@
         continue;
       }
 
-      // 4. 小 (コードブロック/コピーボタン付き)
+      // 4. 小 (文字を小さくする)
       if (line.startsWith('小 ')) {
         const content = line.slice(2).trim();
-        nodes.appendChild(createCopyBox(content));
+        nodes.appendChild(createSmallText(content));
         continue;
       }
       
-      // 5. 画像
-      if (line.startsWith('画像 ')) {
-        const parts = line.slice(3).trim().split(/\s+/);
-        if (parts.length >= 1) {
-            const rawUrl = parts[0];
-            const altText = parts.slice(1).join(' ') || '引用画像';
-            const safe = validateAndNormalizeUrl(rawUrl);
-            if (safe) {
-                const figure = document.createElement('figure');
-                const img = document.createElement('img');
-                img.src = safe;
-                img.alt = altText;
-                const caption = document.createElement('figcaption');
-                appendTextNode(caption, altText);
-                figure.appendChild(img);
-                figure.appendChild(caption);
-                nodes.appendChild(figure);
-            } else {
-                nodes.appendChild(createParagraph('[無効な画像URL: ' + rawUrl + ']'));
-            }
+      // 5. コピー (コピーボタン付き)
+      if (line.startsWith('コピー ')) {
+        const content = line.slice(4).trim();
+        nodes.appendChild(createCopyBox(content));
+        continue;
+      }
+
+
+      // 6. 引用 (画像)
+      if (line.startsWith('引用 ')) {
+        const rawUrl = line.slice(3).trim().split(/\s+/)[0];
+        const safe = validateAndNormalizeUrl(rawUrl);
+        if (safe) {
+            const figure = document.createElement('figure');
+            const img = document.createElement('img');
+            img.src = safe;
+            img.alt = `画像引用: ${safe}`; // URLを代替テキストとして使用
+            const caption = document.createElement('figcaption');
+            appendTextNode(caption, safe);
+            figure.appendChild(img);
+            figure.appendChild(caption);
+            nodes.appendChild(figure);
         } else {
-            nodes.appendChild(createParagraph('[画像 の形式が不正です]'));
+            nodes.appendChild(createParagraph('[無効な画像URL: ' + rawUrl + ']'));
         }
         continue;
       }
 
-      // 6. 色付
-      if (line.startsWith('色付 ')) {
-          const parts = line.slice(3).trim().match(/^\((.+?)\)\s*(.+)/);
+      // 7. 色付 または 枠文字 (同じ形式でパース)
+      if (line.startsWith('色付 ') || line.startsWith('枠文字 ')) {
+          const isBorder = line.startsWith('枠文字 ');
+          const prefixLength = isBorder ? 5 : 3; // "枠文字 "は5文字、"色付 "は3文字
+          
+          // (色) テキスト のパターンを抽出
+          const parts = line.slice(prefixLength).trim().match(/^\((.+?)\)\s*(.+)/);
+          
           if (parts && parts.length === 3) {
-              const color = parts[1].trim();
+              const rawColor = parts[1].trim();
               const content = parts[2].trim();
-              if (isValidColor(color)) {
+              const color = normalizeColor(rawColor);
+
+              if (color) {
                   const p = document.createElement('p');
                   const span = document.createElement('span');
-                  span.style.color = color;
                   appendTextNode(span, content);
+                  
+                  if (isBorder) {
+                      span.className = 'bordered-text';
+                      span.style.borderColor = color;
+                      span.style.color = color; // 枠と文字の色を統一
+                  } else {
+                      span.style.color = color;
+                  }
+                  
                   p.appendChild(span);
                   nodes.appendChild(p);
               } else {
-                  nodes.appendChild(createParagraph(`[無効な色: ${color}] ${content}`));
+                  nodes.appendChild(createParagraph(`[無効な色: ${rawColor}] ${content}`));
               }
           } else {
-              nodes.appendChild(createParagraph('[色付 の形式が不正です]'));
+              nodes.appendChild(createParagraph(`[${isBorder ? '枠文字' : '色付'} の形式が不正です] (${line})`));
           }
           continue;
       }
 
-      // 7. 埋め (リンク)
+      // 8. 埋め (リンク)
       if (line.startsWith('埋め ')) {
         const parts = line.split(/\s+/);
         if (parts.length >= 2) {
@@ -311,20 +369,20 @@
         continue;
       }
 
-      // 8. 空行: 改行 <br>
+      // 9. 空行: 改行 <br>
       if (line.trim() === '') {
         nodes.appendChild(document.createElement('br'));
         continue;
       }
 
-      // 9. その他: 通常の段落 <p>
+      // 10. その他: 通常の段落 <p>
       nodes.appendChild(createParagraph(line));
     }
     return nodes;
   }
 
   // --- イベントハンドラ ---
-  
+
   function checkRateLimit() {
     const now = Date.now();
     while (submitTimestamps.length && (now - submitTimestamps[0]) > CONFIG.SUBMIT_WINDOW_MS) {
@@ -366,15 +424,22 @@
   // 自動公開実行
   publishBtn.addEventListener('click', async () => {
     const markscript = inputEl.value;
-    const path = publishPathEl.value.trim();
+    let path = publishPathEl.value.trim();
 
     if (!markscript || markscript.length > CONFIG.MAX_INPUT_CHARS) {
         alert('公開する内容が無効または大きすぎます。');
         return;
     }
+    
+    // フォルダ統一の処理: パスが "site/" で始まっていない場合は付与する
+    if (!path.startsWith('site/')) {
+        // 先頭のスラッシュを削除し、'site/'を付与
+        path = 'site/' + path.replace(/^\/+/, ''); 
+    }
+
     // パスの簡易検証 (サーバー側でもより厳密に行う)
-    if (!path || !path.match(/^[a-zA-Z0-9_\-\/]+\.html$/)) {
-        alert('有効なファイルパス（例: user/index.html）を入力してください。');
+    if (!path.endsWith('.html') || !path.match(/^[a-zA-Z0-9_\-\/]+\.html$/)) {
+        alert('有効なファイルパス（例: site/mypage.html）を入力してください。');
         return;
     }
 
