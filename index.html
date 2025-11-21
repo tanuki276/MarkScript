@@ -511,3 +511,555 @@
 </script>
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>MarkScript Viewer — 拡張版</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+<style>
+  /* --- 基本スタイル --- */
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: #f9f9f9; padding: 20px; color: #222; transition: background-color .25s, color .25s; }
+  h1 { color: #444; }
+  textarea { width:100%; max-width:800px; height:200px; padding:10px; border-radius:8px; border:1px solid #ccc; box-shadow:1px 1px 5px rgba(0,0,0,0.05); font-size:14px; resize:vertical; background:white; color:#222; }
+
+  /* コントロールパネル */
+  .controls { max-width: 800px; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .controls input[type="text"] { flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; }
+  .controls button { padding:10px 20px; font-size:14px; border:none; background:#3f8efc; color:white; border-radius:6px; cursor:pointer; white-space: nowrap; }
+  .controls button:disabled { opacity:.6; cursor:not-allowed; }
+
+  /* プレビューエリア */
+  .copy-box { background:#eee; padding:8px; display:inline-flex; align-items:center; margin:5px 0; border-radius:5px; }
+  .copy-box button { margin-left:10px; padding:4px 8px; font-size:12px; }
+  #output { background:white; border:1px solid #ccc; padding:15px; margin-top:20px; max-width:800px; border-radius:10px; }
+
+  /* マニュアル */
+  #manual { background:#e9f5ff; padding:15px; border-left:5px solid #3f8efc; margin-bottom:20px; max-width:800px; border-radius:8px; font-size: 0.9em; }
+  #manual hr { margin: 8px 0; }
+  #modeToggle { position:fixed; top:20px; right:20px; background:#3f8efc; color:#fff; border-radius:50px; padding:8px 15px; font-weight:bold; cursor:pointer; z-index:1000; }
+
+  /* 画像引用のプレビュー用スタイル */
+  #output img { max-width: 100%; height: auto; display: block; margin: 10px 0; border-radius: 5px; }
+  #output figure { margin: 0; }
+  #output figcaption { font-size: 0.9em; color: #666; text-align: center; margin-top: 5px; }
+
+  /* 枠文字のプレビュー用スタイル */
+  .bordered-text { border: 2px solid; padding: 5px 10px; display: inline-block; border-radius: 5px; margin: 5px 0; }
+  .small-text { font-size: smaller; } /* 小文字 */
+
+
+  /* ダークモードスタイル */
+  body.dark { background:#121212; color:#ddd; }
+  body.dark textarea { background:#222; color:#eee; border-color:#555; }
+  body.dark #output { background:#222; border-color:#444; }
+  body.dark .copy-box { background: #333; }
+  body.dark #manual { background: #1a2233; border-color: #3f8efc; color: #eee; }
+  body.dark .bordered-text { color: inherit; background: transparent; }
+
+  @media (max-width:600px) { textarea,#output,#manual,.controls { max-width:100%; } #modeToggle { top:10px; right:10px; padding:6px 12px; } }
+</style>
+</head>
+<body>
+<h1>MarkScript Viewer — 拡張版</h1>
+
+<div id="manual">
+  <strong>■ MarkScript（拡張機能）：</strong><br />
+  ・<code>タイトル </code>：大見出し（h1）<br />
+  ・<code>大 </code>：中見出し（h3）<br />
+  ・**<code>小 テキスト</code>**：文字を小さく表示<br />
+  ・**<code>コピー テキスト</code>**：コピーボタン付きのテキスト<br />
+  ・<code>埋め URL テキスト</code>：リンク（http/https のみ）<br />
+  <hr>
+  ・**<code>背景 (色名/HEX)</code>**：コンテンツの背景色を設定（最初の行のみ有効）<br />
+  ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け<br />
+  ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける<br />
+  ・**<code>引用 URL</code>**：画像を引用表示<br />
+  ・**<code>改行</code>**：強制改行 (<code>&lt;br&gt;</code>) <br />
+  ・空行：改行 (<code>&lt;br&gt;</code>) <br />
+  ・その他：通常の段落
+</div>
+
+<textarea id="input" placeholder="ここにMarkScriptを書いてください"></textarea>
+
+<div class="controls">
+    <button id="run">変換してプレビュー</button>
+    <button id="contactBtn">お問い合わせ</button>
+
+    <input type="text" id="publishPath" placeholder="公開パス (例: mypage.html。自動で site/ が先頭に付きます)">
+    <button id="publishBtn">自動公開を実行</button>
+</div>
+
+<div id="output" aria-live="polite"></div>
+
+<div id="modeToggle" role="button" aria-pressed="false">ダークモード</div>
+
+<script>
+(function(){
+  'use strict';
+
+  // --- Configuration / limits ---
+  const CONFIG = {
+    MAX_INPUT_CHARS: 20000,
+    MAX_LINE_CHARS: 2000,
+    MAX_LINES: 2000,
+    SUBMIT_WINDOW_MS: 60_000,
+    MAX_SUBMITS_PER_WINDOW: 15,
+    COOLDOWN_MS: 800,
+    ALLOWED_URL_PROTOCOLS: ['http:', 'https:']
+  };
+
+  const COLOR_MAP = {
+      '赤': 'red',
+      '青': 'blue',
+      '緑': 'green',
+      '黄': 'yellow', // 修正: '黄' を追加
+      '黒': 'black',
+      '白': 'white',
+      '灰': 'gray', // 修正: 'グレー' を '灰' に変更
+      '紫': 'purple',
+      'オレンジ': 'orange',
+  };
+
+  const submitTimestamps = [];
+  let lastClick = 0;
+
+  const inputEl = document.getElementById('input');
+  const runBtn = document.getElementById('run');
+  const outputEl = document.getElementById('output');
+  const contactBtn = document.getElementById('contactBtn');
+  const publishBtn = document.getElementById('publishBtn');
+  const publishPathEl = document.getElementById('publishPath');
+  const modeToggle = document.getElementById('modeToggle');
+
+  // --- ユーティリティ関数群 ---
+
+  function appendTextNode(parent, text) {
+    parent.appendChild(document.createTextNode(text));
+  }
+
+  function validateAndNormalizeUrl(raw) {
+    try {
+      const cleaned = raw.trim();
+      // 1. 不正文字フィルタリング (XSS防止) と空白チェックを強化
+      if (/\s/.test(cleaned) || /[<>"'`]/.test(cleaned)) return null; 
+
+      const url = new URL(cleaned, location.href);
+      if (!CONFIG.ALLOWED_URL_PROTOCOLS.includes(url.protocol)) return null;
+      // 2. ユーザー名/パスワード/ポートを許可しない
+      if (url.username || url.password || url.port) return null;
+      // 3. URL全体の長さ制限
+      if (url.href.length > 2048) return null;
+      // 4. パスに '../' が含まれていないか簡易チェック
+      if (url.pathname.includes('..')) return null; 
+      
+      return url.href;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function normalizeColor(input) {
+      if (!input) return null;
+      const lower = input.toLowerCase();
+      // 1. 日本語の色名マップ
+      if (COLOR_MAP[input]) {
+          return COLOR_MAP[input];
+      }
+      // 2. HEXコード
+      if (/^#([0-9A-F]{3}){1,2}$/i.test(input)) {
+          return input;
+      }
+      // 3. [強化] CSSのRGB/RGBA, HSL/HSLA 形式
+      if (/^rgba?\((.+?)\)$/i.test(lower) || /^hsla?\((.+?)\)$/i.test(lower)) {
+          return input;
+      }
+      // 4. CSSの予約語
+      if (/^[a-z]+$/.test(lower)) {
+          return lower;
+      }
+      return null;
+  }
+
+  async function writeToClipboard(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (e) { /* fall through */ }
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return !!ok;
+      } catch (e) {
+        return false;
+      }
+  }
+
+  function clearOutput() {
+    while (outputEl.firstChild) outputEl.removeChild(outputEl.firstChild);
+  }
+
+  function createParagraph(text) {
+    const p = document.createElement('p');
+    appendTextNode(p, text);
+    return p;
+  }
+
+  function createSmallText(text) {
+    const p = document.createElement('p');
+    p.className = 'small-text';
+    appendTextNode(p, text);
+    return p;
+  }
+
+
+  function createCopyBox(content) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'copy-box';
+    const span = document.createElement('span');
+    appendTextNode(span, content);
+    span.style.wordBreak = 'break-word';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    appendTextNode(btn, 'コピー');
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      btn.disabled = true;
+      try {
+        const ok = await writeToClipboard(content);
+        const old = btn.textContent;
+        btn.textContent = ok ? 'コピー済み' : '失敗';
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    wrapper.appendChild(span);
+    wrapper.appendChild(btn);
+    return wrapper;
+  }
+
+  function createSafeLink(url, text) {
+    const a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+    appendTextNode(a, text || url);
+    return a;
+  }
+
+  // --- メインパーサー ---
+
+  function parseMarkScriptToNodes(text) {
+    const nodes = document.createDocumentFragment();
+    const lines = text.split(/\r?\n/).slice(0, CONFIG.MAX_LINES);
+    let isFirstLine = true; 
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      if (line == null) line = '';
+      if (line.length > CONFIG.MAX_LINE_CHARS) {
+        line = line.slice(0, CONFIG.MAX_LINE_CHARS) + '…';
+      }
+
+      // 1. 背景 (サーバー側でのみ適用される設定行)
+      if (isFirstLine && line.startsWith('背景 ')) {
+          const color = line.slice(3).trim().split(/\s+/)[0];
+          const validColor = normalizeColor(color);
+          const p = createParagraph(`[設定行] 背景色が "${validColor || color}" に設定されました (プレビュー無効)`);
+          p.style.opacity = 0.6;
+          nodes.appendChild(p);
+          isFirstLine = false;
+          continue;
+      }
+      isFirstLine = false;
+
+
+      // 2. タイトル
+      if (line.startsWith('タイトル ')) {
+        const textPart = line.slice(4).trim();
+        const h1 = document.createElement('h1');
+        appendTextNode(h1, textPart);
+        nodes.appendChild(h1);
+        continue;
+      }
+
+      // 3. 大
+      if (line.startsWith('大 ')) {
+        const textPart = line.slice(2).trim();
+        const h3 = document.createElement('h3');
+        appendTextNode(h3, textPart);
+        nodes.appendChild(h3);
+        continue;
+      }
+
+      // 4. 小 (文字を小さくする)
+      if (line.startsWith('小 ')) {
+        const content = line.slice(2).trim();
+        nodes.appendChild(createSmallText(content));
+        continue;
+      }
+
+      // 5. コピー (コピーボタン付き)
+      if (line.startsWith('コピー ')) {
+        const content = line.slice(4).trim();
+        nodes.appendChild(createCopyBox(content));
+        continue;
+      }
+
+
+      // 6. 引用 (画像)
+      if (line.startsWith('引用 ')) {
+        const rawUrl = line.slice(3).trim().split(/\s+/)[0];
+        const safe = validateAndNormalizeUrl(rawUrl);
+        if (safe) {
+            const figure = document.createElement('figure');
+            const img = document.createElement('img');
+            img.src = safe;
+            // appendTextNodeを使用し、XSS対策を強化
+            img.alt = `画像引用: ${safe}`; 
+            const caption = document.createElement('figcaption');
+            appendTextNode(caption, safe);
+            figure.appendChild(img);
+            figure.appendChild(caption);
+            nodes.appendChild(figure);
+        } else {
+            nodes.appendChild(createParagraph('[無効な画像URL: ' + rawUrl + ']'));
+        }
+        continue;
+      }
+
+      // 7. 色付 または 枠文字 (パースロジックを改善)
+      if (line.startsWith('色付 ') || line.startsWith('枠文字 ')) {
+          const isBorder = line.startsWith('枠文字 ');
+          const prefixLength = isBorder ? 5 : 3;
+
+          // (色) のパターンの抽出をより厳密に行う
+          const content = line.slice(prefixLength).trim();
+          const match = content.match(/^\(([^)]+)\)\s*(.*)/);
+
+          if (match && match.length >= 3) {
+              const rawColor = match[1].trim();
+              const contentText = match[2].trim();
+              const color = normalizeColor(rawColor);
+
+              if (color) {
+                  const p = document.createElement('p');
+                  const span = document.createElement('span');
+                  appendTextNode(span, contentText); // テキストノードで挿入
+
+                  if (isBorder) {
+                      span.className = 'bordered-text';
+                      span.style.borderColor = color;
+                      span.style.color = color; 
+                  } else {
+                      span.style.color = color;
+                  }
+
+                  p.appendChild(span);
+                  nodes.appendChild(p);
+              } else {
+                  nodes.appendChild(createParagraph(`[無効な色: ${rawColor}] ${contentText}`));
+              }
+          } else {
+              nodes.appendChild(createParagraph(`[${isBorder ? '枠文字' : '色付'} の形式が不正です] (${line})`));
+          }
+          continue;
+      }
+
+      // 8. 埋め (リンク)
+      if (line.startsWith('埋め ')) {
+        const parts = line.split(/\s+/);
+        if (parts.length >= 2) {
+          const rawUrl = parts[1];
+          const linkText = parts.slice(2).join(' ') || rawUrl;
+          const safe = validateAndNormalizeUrl(rawUrl);
+          if (safe) {
+              const p = document.createElement('p');
+              p.appendChild(createSafeLink(safe, linkText));
+              nodes.appendChild(p);
+          } else {
+            nodes.appendChild(createParagraph('[無効なURL: ' + rawUrl + ']'));
+          }
+        } else {
+          nodes.appendChild(createParagraph('[埋め の形式が不正です]'));
+        }
+        continue;
+      }
+      
+      // 9. [追加] 改行コマンド <br>
+      if (line.startsWith('改行')) {
+          nodes.appendChild(document.createElement('br'));
+          continue;
+      }
+
+      // 10. 空行: 改行 <br> (既存の動作維持)
+      if (line.trim() === '') {
+        nodes.appendChild(document.createElement('br'));
+        continue;
+      }
+
+      // 11. その他: 通常の段落 <p>
+      nodes.appendChild(createParagraph(line));
+    }
+    return nodes;
+  }
+
+  // --- イベントハンドラ ---
+
+  function checkRateLimit() {
+    const now = Date.now();
+    while (submitTimestamps.length && (now - submitTimestamps[0]) > CONFIG.SUBMIT_WINDOW_MS) {
+      submitTimestamps.shift();
+    }
+    if (submitTimestamps.length >= CONFIG.MAX_SUBMITS_PER_WINDOW) {
+      // エラーメッセージを具体的に改善
+      alert(`短時間に処理が集中しています。${CONFIG.COOLDOWN_MS / 1000}秒以上待ってから再度「変換してプレビュー」ボタンを押してください。`);
+      return false;
+    }
+    submitTimestamps.push(now);
+    return true;
+  }
+
+  // プレビュー実行
+  runBtn.addEventListener('click', (ev) => {
+    const now = Date.now();
+    if (now - lastClick < CONFIG.COOLDOWN_MS) return; 
+    lastClick = now;
+
+    if (!checkRateLimit()) {
+      return; // アラートは checkRateLimit 内で実行される
+    }
+
+    const input = inputEl.value || '';
+    if (input.length > CONFIG.MAX_INPUT_CHARS) {
+      alert('入力が大きすぎます（最大 ' + CONFIG.MAX_INPUT_CHARS + ' 文字）。');
+      return;
+    }
+
+    clearOutput();
+
+    try {
+      const fragment = parseMarkScriptToNodes(input);
+      outputEl.appendChild(fragment);
+    } catch (e) {
+      console.error(e);
+      outputEl.appendChild(createParagraph('[変換中にエラーが発生しました]'));
+    }
+  });
+
+  // 自動公開実行
+  publishBtn.addEventListener('click', async () => {
+    const markscript = inputEl.value;
+    let path = publishPathEl.value.trim();
+
+    if (!markscript || markscript.length > CONFIG.MAX_INPUT_CHARS) {
+        alert('公開する内容が無効または大きすぎます。');
+        return;
+    }
+
+    // パスにスラッシュが含まれていない場合、強制的にファイル名を付与
+    if (!path.includes('/')) {
+        path = 'site/' + path.replace(/^\/+/, ''); 
+    }
+    // フォルダ統一の処理: パスが "site/" で始まっていない場合は付与する
+    else if (!path.startsWith('site/')) {
+        path = 'site/' + path.replace(/^\/+/, ''); 
+    }
+
+
+    // パスの簡易検証 (サーバー側でもより厳密に行う)
+    if (!path.endsWith('.html') || !path.match(/^[a-zA-Z0-9_\-\/]+\.html$/)) {
+        alert('有効なファイルパス（例: mypage.html）を入力してください。自動で site/ が先頭に付きます。');
+        return;
+    }
+
+    if (!checkRateLimit()) {
+      return; // アラートは checkRateLimit 内で実行される
+    }
+
+    publishBtn.disabled = true;
+    publishBtn.textContent = '公開中...';
+
+    try {
+        const response = await fetch('/api/deploy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                markscript: markscript,
+                filepath: path 
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('公開成功！新しいサイトのURL: ' + result.publishedUrl);
+        } else {
+            alert('公開エラー: ' + (result.error || '不明なエラーが発生しました。'));
+        }
+    } catch (e) {
+        console.error('Fetch Error:', e);
+        alert('通信エラーが発生しました。サーバーレス関数がデプロイされているか確認してください。');
+    } finally {
+        publishBtn.disabled = false;
+        publishBtn.textContent = '自動公開を実行';
+    }
+  });
+
+
+  // --- その他のロジック ---
+  function setupModeToggle() {
+    // UI改善: ブラウザ/OSの設定に合わせて自動でダークモードを適用
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.body.classList.add('dark');
+        modeToggle.textContent = 'ライトモード';
+        modeToggle.setAttribute('aria-pressed', 'true');
+    }
+  }
+
+  contactBtn.addEventListener('click', () => {
+    window.open('https://discord.gg/vq6pqgXj', '_blank', 'noopener');
+  });
+
+  modeToggle.addEventListener('click', () => {
+    const isDark = document.body.classList.toggle('dark');
+    modeToggle.textContent = isDark ? 'ライトモード' : 'ダークモード';
+    modeToggle.setAttribute('aria-pressed', String(isDark));
+  });
+
+  inputEl.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      runBtn.click();
+    }
+  });
+
+  inputEl.addEventListener('paste', (ev) => {
+    try {
+      const paste = (ev.clipboardData || window.clipboardData).getData('text');
+      if (!paste) return;
+      if (paste.length > CONFIG.MAX_INPUT_CHARS * 2) { 
+        ev.preventDefault();
+        alert('貼り付けデータが大きすぎます');
+      }
+    } catch (e) { /* ignore */ }
+  });
+  
+  // 初期設定の呼び出し
+  setupModeToggle();
+
+})();
+</script>
+</body>
+</html>
