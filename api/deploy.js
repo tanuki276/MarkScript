@@ -32,10 +32,16 @@ if (!GITHUB_TOKEN) {
     console.error("GITHUB_TOKENが環境変数に設定されていません。");
 }
 
+// GitHub APIクライアントの初期化
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 
 // --- ユーティリティ ---
+/**
+ * URLを検証し、許可されたプロトコルと形式に正規化する。
+ * @param {string} raw - 生のURL文字列
+ * @returns {string | null} 安全なURLまたはnull
+ */
 function validateAndNormalizeUrl(raw) {
     try {
         const cleaned = raw.trim();
@@ -44,16 +50,16 @@ function validateAndNormalizeUrl(raw) {
 
         const url = new URL(cleaned); 
         const allowedProtocols = ['http:', 'https:'];
-        
+
         // 2. 許可されたプロトコルのみ
         if (!allowedProtocols.includes(url.protocol)) return null; 
-        
+
         // 3. ユーザー名/パスワード/ポートを許可しない
         if (url.username || url.password || url.port) return null;
-        
+
         // 4. URL全体の長さ制限 (DoS攻撃対策)
         if (url.href.length > 2048) return null; 
-        
+
         // 5. パスに '../' のようなディレクトラバーサル要素がないかチェック
         if (url.pathname.includes('..')) return null;
 
@@ -63,7 +69,11 @@ function validateAndNormalizeUrl(raw) {
     }
 }
 
-// フロントエンドと完全に同期させたnormalizeColor
+/**
+ * 日本語の色名またはHEX/CSSの色形式を検証し、正規化する。
+ * @param {string} input - 色名またはHEXコード
+ * @returns {string | null} CSSで使える色名またはnull
+ */
 function normalizeColor(input) {
     if (!input) return null;
     const lower = input.toLowerCase();
@@ -80,7 +90,7 @@ function normalizeColor(input) {
     if (/^rgba?\((.+?)\)$/i.test(lower) || /^hsla?\((.+?)\)$/i.test(lower)) {
         return input;
     }
-    // 4. CSSの予約語
+    // 4. CSSの予約語 (例: red, blue)
     if (/^[a-z]+$/.test(lower)) {
         return lower;
     }
@@ -88,7 +98,7 @@ function normalizeColor(input) {
 }
 
 
-// --- MarkScriptをHTMLフラグメントに変換するロジック ---
+// --- MarkScriptをHTMLフラグメントに変換するロジック (フロントエンドと同期) ---
 function parseMarkScriptToHtmlFragment(text) {
     const lines = text.split(/\r?\n/).slice(0, 2000); 
     let htmlFragment = '';
@@ -117,7 +127,7 @@ function parseMarkScriptToHtmlFragment(text) {
         // 2. タイトル
         if (line.startsWith('タイトル ')) {
             const textPart = line.slice(4).trim();
-            // XSS対策: textPartは安全なテキストだが、念のためHTMLエスケープ処理を推奨
+            // テキストを安全に挿入
             htmlFragment += `<h1>${textPart}</h1>\n`;
             continue;
         }
@@ -136,9 +146,10 @@ function parseMarkScriptToHtmlFragment(text) {
             continue;
         }
 
-        // 5. コピー (コードブロックとして表示 - コピーはクライアント側機能のため、ここではテキスト表示のみ)
+        // 5. コピー 
         if (line.startsWith('コピー ')) {
             const content = line.slice(4).trim();
+            // 公開ページではコピー機能を提供できないため、コードブロックとして表示
             htmlFragment += `<div class="code-box"><pre><code>${content}</code></pre></div>\n`;
             continue;
         }
@@ -149,7 +160,6 @@ function parseMarkScriptToHtmlFragment(text) {
             const safeUrl = validateAndNormalizeUrl(rawUrl);
 
             if (safeUrl) {
-                // imgタグにURLを直接挿入しても、validateAndNormalizeUrlを通しているので安全性が保たれる
                 const altText = `引用画像: ${safeUrl}`;
                 htmlFragment += `<figure><img src="${safeUrl}" alt="${altText}"><figcaption>${safeUrl}</figcaption></figure>\n`;
             } else {
@@ -158,14 +168,14 @@ function parseMarkScriptToHtmlFragment(text) {
             continue;
         }
 
-        // 7. 色付 または 枠文字 (パースロジックをフロントエンドと同期)
+        // 7. 色付 または 枠文字 
         if (line.startsWith('色付 ') || line.startsWith('枠文字 ')) {
             const isBorder = line.startsWith('枠文字 ');
             const prefixLength = isBorder ? 5 : 3;
 
-            // 修正: (色) テキスト のパターンを抽出を強化
+            // (色) テキスト のパターンを抽出
             const content = line.slice(prefixLength).trim();
-            const match = content.match(/^\(([^)]+)\)\s*(.*)/); // 最初の閉じ括弧までを色とする
+            const match = content.match(/^\(([^)]+)\)\s*(.*)/); 
 
             if (match && match.length >= 3) {
                 const rawColor = match[1].trim();
@@ -184,10 +194,10 @@ function parseMarkScriptToHtmlFragment(text) {
                     // contentTextはテキストとして安全に挿入
                     htmlFragment += `<p${pClass ? ` class="${pClass}"` : ''}><span style="${spanStyle}">${contentText}</span></p>\n`;
                 } else {
-                    htmlFragment += `<p>[無効な色: ${rawColor}] ${contentText}</p>\n`;
+                    htmlFragment += `<p style="color: red; font-style: italic;">[無効な色: ${rawColor}] ${contentText}</p>\n`;
                 }
             } else {
-                 htmlFragment += `<p>[${isBorder ? '枠文字' : '色付'} の形式が不正です]</p>\n`;
+                 htmlFragment += `<p style="color: red; font-style: italic;">[${isBorder ? '枠文字' : '色付'} の形式が不正です]</p>\n`;
             }
             continue;
         }
@@ -203,20 +213,20 @@ function parseMarkScriptToHtmlFragment(text) {
                 if (safeUrl) {
                     htmlFragment += `<p><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a></p>\n`;
                 } else {
-                    htmlFragment += `<p>[無効なURL: ${rawUrl} - リンクがブロックされました]</p>\n`;
+                    htmlFragment += `<p style="color: red; font-style: italic;">[無効なURL: ${rawUrl} - リンクがブロックされました]</p>\n`;
                 }
             } else {
-                htmlFragment += `<p>[埋め の形式が不正です]</p>\n`;
+                htmlFragment += `<p style="color: red; font-style: italic;">[埋め の形式が不正です]</p>\n`;
             }
             continue;
         }
 
-        // 9. [新規追加] 改行コマンド <br> (フロントエンドと同期)
+        // 9. 改行コマンド <br>
         if (line.startsWith('改行')) {
             htmlFragment += '<br>\n';
             continue;
         }
-        
+
         // 10. 空行: 改行 <br>
         if (line.trim() === '') {
             htmlFragment += '<br>\n';
@@ -234,6 +244,7 @@ function parseMarkScriptToHtmlFragment(text) {
 function convertMarkscriptToFullHtml(markscript) {
     const { fragment, bgColor } = parseMarkScriptToHtmlFragment(markscript);
 
+    // タイトルをフラグメントから抽出
     const match = fragment.match(/<h1>(.*?)<\/h1>/);
     const title = match ? match[1].replace(/<\/?[^>]+(>|$)/g, "") : 'MarkScript Published Site'; 
 
@@ -300,6 +311,7 @@ module.exports = async (req, res) => {
     // JSONボディのパース
     let body;
     try {
+        // Vercel/Netlifyの環境によっては、req.bodyが既にパースされている場合と、生のJSON文字列である場合がある
         body = req.body || (typeof req.body === 'string' ? JSON.parse(req.body) : {});
     } catch (e) {
         return res.status(400).json({ error: '無効なJSON形式です。' });
@@ -314,16 +326,17 @@ module.exports = async (req, res) => {
     // パスのサニタイズと正規化
     // 1. パストラバーサルの防止と空白の除去
     let cleanPath = rawFilepath.replace(/\.\.[\/\\]/g, '').trim(); 
-    
+
     // 2. "site/" プレフィックスの保証
     if (!cleanPath.startsWith('site/')) {
         cleanPath = 'site/' + cleanPath.replace(/^\/+/, ''); // 先頭のスラッシュを削除してから 'site/' を付与
     }
 
-    if (!cleanPath.endsWith('.html') || cleanPath.length < 10) { // 最低限の長さチェックも追加
+    // 3. 拡張子と長さのチェック
+    if (!cleanPath.endsWith('.html') || cleanPath.length < 10) { 
         return res.status(400).json({ error: 'ファイルパスは.htmlで終わり、適切な長さである必要があります。' });
     }
-    
+
     // GitHub APIで既存のファイルのSHAを取得 (上書きフラグとして利用)
     let sha = null;
 
@@ -338,7 +351,7 @@ module.exports = async (req, res) => {
             });
             sha = data.sha;
         } catch (error) {
-            // 404以外は致命的なエラーとしてスロー
+            // 404 (ファイルが存在しない) 以外は致命的なエラーとしてスロー
             if (error.status !== 404) {
                 console.error(`Error getting SHA for ${cleanPath}:`, error.message);
                 throw error;
@@ -349,6 +362,7 @@ module.exports = async (req, res) => {
         const htmlContent = convertMarkscriptToFullHtml(markscript);
 
         // 3. コンテンツをBase64でエンコード (GitHub APIの要件)
+        // 既にutf-8なので、そのままBase64に
         const contentBase64 = Buffer.from(htmlContent, 'utf-8').toString('base64');
 
         // 4. GitHub APIを使用してファイルをリポジトリにプッシュ/更新
@@ -362,7 +376,7 @@ module.exports = async (req, res) => {
             sha: sha, // shaがあれば更新、なければ新規作成
         });
 
-        // 5. 公開URLを返す (ドメインの末尾にスラッシュがないことを確認し、パスを結合)
+        // 5. 公開URLを返す 
         const finalDomain = PUBLISHED_DOMAIN.endsWith('/') ? PUBLISHED_DOMAIN.slice(0, -1) : PUBLISHED_DOMAIN;
         const publishedUrl = `${finalDomain}/${cleanPath}`;
 
@@ -372,9 +386,14 @@ module.exports = async (req, res) => {
         });
 
     } catch (error) {
+        // GitHub APIのエラーレスポンスを詳しくログに出力
         console.error('GitHub API Error (General):', error.message);
+        if (error.response && error.response.data) {
+             console.error('GitHub Response Data:', error.response.data);
+        }
+
         res.status(500).json({ 
-            error: 'デプロイ中にエラーが発生しました。リポジトリ名、ブランチ、トークンの権限（`repo`スコープ）を確認してください。',
+            error: 'デプロイ中にエラーが発生しました。リポジトリ名、ブランチ、またはGitHubトークンの権限（`repo`スコープ）を確認してください。',
             details: error.message 
         });
     }
