@@ -6,9 +6,9 @@ const { URL } = require('url');
 
 // --- 設定/環境変数 ---
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const REPO_OWNER = 'YOUR_GITHUB_USERNAME'; // !!! ここを自分のGitHubユーザー名に変更 !!!
-const REPO_NAME = 'markscript-published-sites'; // !!! ここを公開用リポジトリ名に変更 !!!
-const PUBLISHED_DOMAIN = 'https://YOUR-SITE-DOMAIN.com'; // !!! 実際にデプロイされたドメインに変更 !!!
+const REPO_OWNER = 'tanuki276'; // !!! ここを自分のGitHubユーザー名に変更 !!!
+const REPO_NAME = 'MarkScript'; // !!! ここを公開用リポジトリ名に変更 !!!
+const PUBLISHED_DOMAIN = 'https://markscript.vercel.app/'; // !!! 実際にデプロイされたドメインに変更 !!!
 const BRANCH = 'main'; // 公開ブランチ
 
 const COLOR_MAP = {
