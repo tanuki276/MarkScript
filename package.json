@@ -1,0 +1,13 @@
+{
+  "name": "markscript-viewer-deployer",
+  "version": "1.0.0",
+  "description": "MarkScript viewer with GitHub auto-deploy functionality.",
+  "main": "api/deploy.js",
+  "scripts": {
+    "start": "node api/deploy.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.1.0", 
+    "url": "^0.11.3" 
+  }
+}
