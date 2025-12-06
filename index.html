@@ -72,6 +72,11 @@
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
     min-height: 100px;
   }
+  
+  /* インライン要素の修正のために追加: <p>タグ内のインライン要素が親の行に収まるように */
+  #output p { margin: 0 0 1em 0; line-height: 1.6; }
+  #output p:last-child { margin-bottom: 0; }
+
 
   /* マニュアル */
   #manual { 
@@ -117,16 +122,16 @@
   /* 小文字 */
   .small-text { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.5rem; }
 
-  /* 枠文字のプレビュー用スタイル (修正: インライン要素として機能させる) */
+  /* 枠文字のプレビュー用スタイル (インライン要素として機能させる) */
   .colored-text, .bordered-text {
-    padding: 2px 4px; /* タッチターゲットを意識して微調整 */
+    padding: 2px 4px; 
     border-radius: 4px;
     margin: 0 2px;
   }
 
   .bordered-text { 
     border: 2px solid; 
-    display: inline-block; 
+    display: inline-block; /* インラインブロックにして枠線の見た目を保つ */
     padding: 5px 10px;
   }
 
@@ -166,11 +171,11 @@
   ・<code>大 </code>：中見出し（h3）<br />
   ・**<code>小 テキスト</code>**：文字を小さく表示<br />
   ・**<code>コピー テキスト</code>**：コピーボタン付きのテキスト<br />
-  ・<code>埋め URL テキスト</code>：リンク（http/https のみ）<br />
+  ・<code>埋め URL テキスト</code>：リンク (インライン、http/https のみ)<br />
   <hr>
   ・**<code>背景 (色名/HEX)</code>**：コンテンツの背景色を設定（最初の行のみ有効）<br />
-  ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け (インライン)<br />
-  ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける (インライン)<br />
+  ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け (**インライン**) <br />
+  ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける (**インライン**) <br />
   ・**<code>引用 URL</code>**：画像を引用表示<br />
   ・**<code>改行</code>**：強制改行 (<code>&lt;br&gt;</code>) <br />
   ・空行：改行 (<code>&lt;br&gt;</code>) <br />
@@ -183,7 +188,7 @@
     <button id="run">変換してプレビュー</button>
     <button id="contactBtn">お問い合わせ</button>
 
-    <input type="text" id="publishPath" placeholder="公開パス (例: mypage.html。自動で site/ が先頭に付きます)">
+    <input type="text" id="publishPath" placeholder="公開パス (例: mypage.html。site/フォルダに作成)">
     <button id="publishBtn">自動公開を実行</button>
 </div>
 
@@ -204,7 +209,6 @@
     MAX_SUBMITS_PER_WINDOW: 15,
     COOLDOWN_MS: 800,
     ALLOWED_URL_PROTOCOLS: ['http:', 'https:'],
-    // ユーザー向けのカスタムアラートを避ける
     RATE_LIMIT_MESSAGE: '短時間に処理が集中しています。しばらく待ってから再度実行してください。',
     GENERIC_ERROR_MESSAGE: '[エラーが発生しました。入力形式を確認してください。]',
   };
@@ -217,7 +221,7 @@
       '黄': 'yellow',
       '黒': 'black',
       '白': 'white',
-      '灰': 'gray', // 'グレー' から '灰' に修正済
+      '灰': 'gray', 
       '紫': 'purple',
       'オレンジ': 'orange',
   };
@@ -263,7 +267,7 @@
       if (url.username || url.password || url.port) return null;
       if (url.href.length > 2048) return null;
       if (url.pathname.includes('..')) return null; 
-      
+
       return url.href;
     } catch (e) {
       return null;
@@ -301,22 +305,82 @@
       }
   }
 
+  function createCopyBox(text) {
+    const div = document.createElement('div');
+    div.className = 'copy-box';
+
+    const span = document.createElement('span');
+    appendTextNode(span, text);
+    
+    const button = document.createElement('button');
+    appendTextNode(button, 'コピー');
+    
+    button.addEventListener('click', async () => {
+        const success = await writeToClipboard(text);
+        button.textContent = success ? 'コピー完了!' : '失敗';
+        setTimeout(() => button.textContent = 'コピー', 1500);
+    });
+
+    div.appendChild(span);
+    div.appendChild(button);
+    return div;
+  }
+
   function createParagraph(text) {
     const p = document.createElement('p');
     appendTextNode(p, text);
     return p;
   }
 
-  function createSafeLink(url, text) {
-    const a = document.createElement('a');
-    a.setAttribute('href', url);
-    a.setAttribute('target', '_blank');
-    a.setAttribute('rel', 'noopener noreferrer');
-    appendTextNode(a, text || url);
-    return a;
+  // --- MarkScriptパーサーのためのヘルパー関数（インライン機能修正版） ---
+
+  /**
+   * インラインディレクティブ（色付, 枠文字, 埋め）をHTML文字列に変換する
+   * @param {string} text - 処理するテキスト行
+   * @returns {string} HTML文字列に置換されたテキスト
+   */
+  function parseLineForInlines(text) {
+    let result = text;
+    
+    // 1. 埋め (リンク) の処理
+    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=\s*埋め|\s*色付|\s*枠文字|$)/g, (match, url, linkText) => {
+        const safeUrl = validateAndNormalizeUrl(url);
+        const display = (linkText || url || '').trim();
+
+        if (safeUrl) {
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+        }
+        return `[無効なURL: ${url}]`; 
+    });
+
+    // 2. 色付 / 枠文字 の処理
+    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$))/g;
+
+    result = result.replace(inlineRegex, (match, type, rawColor, content) => {
+        const color = normalizeColor(rawColor.trim());
+        const contentTrimmed = content.trim();
+
+        if (!color) return `[無効な色: ${rawColor}]`; 
+
+        const isBorder = (type === '枠文字');
+        let style = '';
+        let className = '';
+
+        if (isBorder) {
+            className = 'bordered-text';
+            style = `border-color: ${color}; color: ${color};`;
+        } else {
+            className = 'colored-text';
+            style = `color: ${color};`;
+        }
+
+        return `<span class="${className}" style="${style}">${contentTrimmed}</span>`;
+    });
+
+    return result;
   }
 
-  // --- MarkScriptパーサー ---
+  // --- MarkScriptパーサー（全体のリファクタリング版） ---
 
   function parseMarkScriptToNodes(text) {
     const nodes = document.createDocumentFragment();
@@ -329,7 +393,7 @@
       if (line.length > CONFIG.MAX_LINE_CHARS) {
         line = line.slice(0, CONFIG.MAX_LINE_CHARS) + '…';
       }
-      
+
       const lineTrimmed = line.trim();
       let consumed = false;
 
@@ -395,83 +459,27 @@
         consumed = true;
       }
 
-      // 7. 色付 または 枠文字 (修正ロジック)
-      else if (line.startsWith('色付 ') || line.startsWith('枠文字 ')) {
-          const isBorder = line.startsWith('枠文字 ');
-          const prefixLength = isBorder ? 5 : 3;
-
-          const content = line.slice(prefixLength).trim();
-          // (色) のパターンの抽出をより厳密に行う
-          const match = content.match(/^\(([^)]+)\)\s*(.*)/);
-
-          if (match && match.length >= 3) {
-              const rawColor = match[1].trim();
-              const contentText = match[2].trim();
-              const color = normalizeColor(rawColor);
-
-              if (color) {
-                  const p = document.createElement('p');
-                  const span = document.createElement('span');
-                  appendTextNode(span, contentText); 
-
-                  if (isBorder) {
-                      span.className = 'bordered-text';
-                      span.style.borderColor = color;
-                      span.style.color = color; 
-                  } else {
-                      span.className = 'colored-text';
-                      span.style.color = color;
-                  }
-                  
-                  // pタグを生成し、その中にspanを配置することで、段落としての体裁を維持
-                  p.appendChild(span);
-                  nodes.appendChild(p);
-
-              } else {
-                  nodes.appendChild(createMessage(`[無効な色: ${rawColor}] ${contentText}`, 'red', true));
-              }
-          } else {
-              // 修正後のメッセージ形式
-              nodes.appendChild(createMessage(`[${isBorder ? '枠文字' : '色付'} の形式が不正です]: ${lineTrimmed}`, 'red', true));
-          }
-          consumed = true;
-      }
-
-      // 8. 埋め (リンク)
-      else if (line.startsWith('埋め ')) {
-        const parts = line.split(/\s+/);
-        if (parts.length >= 2) {
-          const rawUrl = parts[1];
-          const linkText = parts.slice(2).join(' ') || rawUrl;
-          const safe = validateAndNormalizeUrl(rawUrl);
-          if (safe) {
-              const p = document.createElement('p');
-              p.appendChild(createSafeLink(safe, linkText));
-              nodes.appendChild(p);
-          } else {
-            nodes.appendChild(createMessage(`[無効なURL: ${rawUrl}]`, 'red', true));
-          }
-        } else {
-          nodes.appendChild(createMessage('[埋め の形式が不正です]', 'red', true));
-        }
-        consumed = true;
-      }
-      
-      // 9. 改行コマンド <br>
+      // 7. 改行コマンド <br>
       else if (line.startsWith('改行')) {
           nodes.appendChild(document.createElement('br'));
           consumed = true;
       }
 
-      // 10. 空行: 改行 <br> (既存の動作維持)
+      // 8. 空行: 改行 <br> (既存の動作維持)
       else if (lineTrimmed === '') {
         nodes.appendChild(document.createElement('br'));
         consumed = true;
       }
 
-      // 11. その他: 通常の段落 <p>
+      // 9. その他: 通常の段落 <p> (インライン処理を適用)
       if (!consumed) {
-        nodes.appendChild(createParagraph(line));
+        // インラインディレクティブ (色付, 枠文字, 埋め) をHTMLに変換
+        const htmlContent = parseLineForInlines(line); 
+
+        // 結果のHTML文字列を安全にDOMノードに変換して段落に追加
+        const p = document.createElement('p');
+        p.innerHTML = htmlContent; 
+        nodes.appendChild(p);
       }
     }
     return nodes;
@@ -506,8 +514,11 @@
       return;
     }
 
-    clearOutput();
-
+    // 以前の出力内容をクリア
+    while (outputEl.firstChild) {
+      outputEl.removeChild(outputEl.firstChild);
+    }
+    
     try {
       const fragment = parseMarkScriptToNodes(input);
       outputEl.appendChild(fragment);
@@ -517,7 +528,7 @@
     }
   });
 
-  // 自動公開実行 (レート制限、パス検証、通信エラー処理は前回と同様)
+  // 自動公開実行 (パス検証と /site フォルダ限定のロジック)
   publishBtn.addEventListener('click', async () => {
     const markscript = inputEl.value;
     let path = publishPathEl.value.trim();
@@ -527,17 +538,29 @@
         return;
     }
 
-    if (!path.includes('/')) {
-        path = 'site/' + path.replace(/^\/+/, ''); 
-    } else if (!path.startsWith('site/')) {
-        path = 'site/' + path.replace(/^\/+/, ''); 
-    }
-
-    if (!path.endsWith('.html') || !path.match(/^[a-zA-Z0-9_\-\/]+\.html$/)) {
-        alert('有効なファイルパス（例: mypage.html）を入力してください。自動で site/ が先頭に付きます。');
+    if (!path) {
+        alert('公開パスを入力してください。');
         return;
     }
 
+    // ⚠️ クライアント側のパス検証 (サーバー側で厳格に再検証されます)
+    // ユーザーが 'mypage.html' のようにファイル名だけを入力した場合に対応
+    if (!path.includes('/')) {
+        path = 'site/' + path;
+    } else {
+        path = path.replace(/^\/+/, ''); 
+        if (!path.startsWith('site/')) {
+            alert('公開は /site フォルダ内に限定されています。有効なパスを入力してください (例: mypage.html または site/mypage.html)。');
+            return;
+        }
+    }
+
+    // 有効なファイルパス形式のチェック（必須: .html、../ 禁止を簡易チェック）
+    if (!path.endsWith('.html') || path.includes('..')) {
+        alert('無効なファイルパスです。ファイルパスは .html で終わる必要があり、".."(上位ディレクトリ)へのアクセスは禁止されています。');
+        return;
+    }
+    
     if (!checkRateLimit()) return;
 
     publishBtn.disabled = true;
@@ -558,7 +581,7 @@
         if (response.ok) {
             alert('公開成功！新しいサイトのURL: ' + result.publishedUrl);
         } else {
-            alert('公開エラー: ' + (result.error || '不明なエラーが発生しました。'));
+            alert('公開エラー: ' + (result.error || '不明なエラーが発生しました。') + (result.details ? ` (${result.details.message || result.details})` : ''));
         }
     } catch (e) {
         console.error('Fetch Error:', e);
@@ -580,7 +603,6 @@
   }
 
   contactBtn.addEventListener('click', () => {
-    // ユーザーにカスタムモダルではなく、標準のwindow.openを使用
     window.open('https://discord.gg/vq6pqgXj', '_blank', 'noopener');
   });
 
@@ -603,4 +625,3 @@
 </script>
 </body>
 </html>
-
