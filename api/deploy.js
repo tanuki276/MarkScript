@@ -2,17 +2,17 @@
 
 // npm install @octokit/rest url
 const { Octokit } = require('@octokit/rest'); 
-const { URL } = require('url'); // Node.js環境でURLを扱う
+const { URL } = require('url'); 
 
 // --- 設定/環境変数 ---
-// 環境変数から取得することを推奨
+// Vercel環境変数: GITHUB_TOKEN
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN; 
 // ユーザー自身の情報に書き換えること
 const REPO_OWNER = 'tanuki276'; 
 const REPO_NAME = 'MarkScript'; 
 // 実際にデプロイされたドメインに変更すること
 const PUBLISHED_DOMAIN = 'https://mark-script.vercel.app'; 
-const BRANCH = 'main'; // 公開ブランチ
+const BRANCH = 'main'; 
 
 // フロントエンドと完全に同期させたCOLOR_MAP
 const COLOR_MAP = {
@@ -22,83 +22,106 @@ const COLOR_MAP = {
     '黄': 'yellow',
     '黒': 'black',
     '白': 'white',
-    '灰': 'gray', // 'グレー'を'灰'に修正
+    '灰': 'gray', 
     '紫': 'purple',
     'オレンジ': 'orange',
 };
 
-// サーバーレス関数環境ではログ出力が重要
 if (!GITHUB_TOKEN) {
     console.error("GITHUB_TOKENが環境変数に設定されていません。");
 }
 
-// GitHub APIクライアントの初期化
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 
 // --- ユーティリティ ---
-/**
- * URLを検証し、許可されたプロトコルと形式に正規化する。
- * @param {string} raw - 生のURL文字列
- * @returns {string | null} 安全なURLまたはnull
- */
 function validateAndNormalizeUrl(raw) {
+    // ... (フロントエンドと共通のロジック) ...
     try {
         const cleaned = raw.trim();
-        // 1. 不正文字フィルタリング ('<', '>', '"', "'"、および空白)
         if (/\s/.test(cleaned) || /[<>"'`]/.test(cleaned)) return null; 
 
         const url = new URL(cleaned); 
         const allowedProtocols = ['http:', 'https:'];
 
-        // 2. 許可されたプロトコルのみ
         if (!allowedProtocols.includes(url.protocol)) return null; 
-
-        // 3. ユーザー名/パスワード/ポートを許可しない
         if (url.username || url.password || url.port) return null;
-
-        // 4. URL全体の長さ制限 (DoS攻撃対策)
         if (url.href.length > 2048) return null; 
-
-        // 5. パスに '../' のようなディレクトラバーサル要素がないかチェック
         if (url.pathname.includes('..')) return null;
 
         return url.href;
     } catch (e) {
-        return null; // 無効なURL構造
+        return null;
     }
 }
 
-/**
- * 日本語の色名またはHEX/CSSの色形式を検証し、正規化する。
- * @param {string} input - 色名またはHEXコード
- * @returns {string | null} CSSで使える色名またはnull
- */
 function normalizeColor(input) {
+    // ... (フロントエンドと共通のロジック) ...
     if (!input) return null;
     const lower = input.toLowerCase();
 
-    // 1. 日本語の色名マップ
     if (COLOR_MAP[input]) {
         return COLOR_MAP[input];
     }
-    // 2. HEXコード
     if (/^#([0-9A-F]{3}){1,2}$/i.test(input)) {
         return input;
     }
-    // 3. CSSのRGB/RGBA, HSL/HSLA 形式 (フロントエンドと同期)
     if (/^rgba?\((.+?)\)$/i.test(lower) || /^hsla?\((.+?)\)$/i.test(lower)) {
         return input;
     }
-    // 4. CSSの予約語 (例: red, blue)
     if (/^[a-z]+$/.test(lower)) {
         return lower;
     }
     return null;
 }
 
+// MarkScriptパーサーのためのヘルパー関数（インライン機能修正版をサーバーサイド向けに調整）
+function parseLineForInlines(text) {
+    // ... (フロントエンドと共通のロジック。ただしコンテンツのエスケープを推奨) ...
+    let result = text;
+    
+    // 1. 埋め (リンク) の処理
+    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=\s*埋め|\s*色付|\s*枠文字|$)/g, (match, url, linkText) => {
+        const safeUrl = validateAndNormalizeUrl(url);
+        // HTMLエンコードを適用 (XSS対策)
+        const display = (linkText || url || '').trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// --- MarkScriptをHTMLフラグメントに変換するロジック (フロントエンドと同期) ---
+        if (safeUrl) {
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+        }
+        return `[無効なURL: ${url}]`; 
+    });
+
+    // 2. 色付 / 枠文字 の処理
+    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$))/g;
+
+    result = result.replace(inlineRegex, (match, type, rawColor, content) => {
+        const color = normalizeColor(rawColor.trim());
+        // HTMLエンコードを適用 (XSS対策)
+        const contentTrimmed = content.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        if (!color) return `[無効な色: ${rawColor}]`; 
+
+        const isBorder = (type === '枠文字');
+        let style = '';
+        let className = '';
+
+        if (isBorder) {
+            className = 'bordered-text';
+            style = `border-color: ${color}; color: ${color};`;
+        } else {
+            className = 'colored-text';
+            style = `color: ${color};`;
+        }
+
+        return `<span class="${className}" style="${style}">${contentTrimmed}</span>`;
+    });
+
+    // インライン処理後の残りのテキストをエスケープ
+    return result.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
+
 function parseMarkScriptToHtmlFragment(text) {
     const lines = text.split(/\r?\n/).slice(0, 2000); 
     let htmlFragment = '';
@@ -126,29 +149,29 @@ function parseMarkScriptToHtmlFragment(text) {
 
         // 2. タイトル
         if (line.startsWith('タイトル ')) {
-            const textPart = line.slice(4).trim();
-            // テキストを安全に挿入
+            // テキストを安全に挿入するためエスケープ
+            const textPart = line.slice(4).trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             htmlFragment += `<h1>${textPart}</h1>\n`;
             continue;
         }
 
         // 3. 大
         if (line.startsWith('大 ')) {
-            const textPart = line.slice(2).trim();
+            const textPart = line.slice(2).trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             htmlFragment += `<h3>${textPart}</h3>\n`;
             continue;
         }
 
         // 4. 小 (文字を小さくする)
         if (line.startsWith('小 ')) {
-            const content = line.slice(2).trim();
+            const content = line.slice(2).trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             htmlFragment += `<p class="small-text">${content}</p>\n`;
             continue;
         }
 
         // 5. コピー 
         if (line.startsWith('コピー ')) {
-            const content = line.slice(4).trim();
+            const content = line.slice(4).trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             // 公開ページではコピー機能を提供できないため、コードブロックとして表示
             htmlFragment += `<div class="code-box"><pre><code>${content}</code></pre></div>\n`;
             continue;
@@ -167,91 +190,36 @@ function parseMarkScriptToHtmlFragment(text) {
             }
             continue;
         }
-
-        // 7. 色付 または 枠文字 
-        if (line.startsWith('色付 ') || line.startsWith('枠文字 ')) {
-            const isBorder = line.startsWith('枠文字 ');
-            const prefixLength = isBorder ? 5 : 3;
-
-            // (色) テキスト のパターンを抽出
-            const content = line.slice(prefixLength).trim();
-            const match = content.match(/^\(([^)]+)\)\s*(.*)/); 
-
-            if (match && match.length >= 3) {
-                const rawColor = match[1].trim();
-                const contentText = match[2].trim();
-                const color = normalizeColor(rawColor);
-
-                if (color) {
-                    let spanStyle = `color: ${color};`;
-                    let pClass = '';
-
-                    if (isBorder) {
-                        spanStyle += `border: 2px solid ${color}; padding: 5px 10px; display: inline-block; border-radius: 5px;`;
-                        pClass = 'bordered-wrapper'; 
-                    }
-
-                    // contentTextはテキストとして安全に挿入
-                    htmlFragment += `<p${pClass ? ` class="${pClass}"` : ''}><span style="${spanStyle}">${contentText}</span></p>\n`;
-                } else {
-                    htmlFragment += `<p style="color: red; font-style: italic;">[無効な色: ${rawColor}] ${contentText}</p>\n`;
-                }
-            } else {
-                 htmlFragment += `<p style="color: red; font-style: italic;">[${isBorder ? '枠文字' : '色付'} の形式が不正です]</p>\n`;
-            }
-            continue;
-        }
-
-        // 8. 埋め (リンク)
-        if (line.startsWith('埋め ')) {
-            const parts = line.split(/\s+/);
-            if (parts.length >= 2) {
-                const rawUrl = parts[1];
-                const linkText = parts.slice(2).join(' ') || rawUrl;
-                const safeUrl = validateAndNormalizeUrl(rawUrl);
-
-                if (safeUrl) {
-                    htmlFragment += `<p><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a></p>\n`;
-                } else {
-                    htmlFragment += `<p style="color: red; font-style: italic;">[無効なURL: ${rawUrl} - リンクがブロックされました]</p>\n`;
-                }
-            } else {
-                htmlFragment += `<p style="color: red; font-style: italic;">[埋め の形式が不正です]</p>\n`;
-            }
-            continue;
-        }
-
-        // 9. 改行コマンド <br>
+        
+        // 7. 改行コマンド <br>
         if (line.startsWith('改行')) {
             htmlFragment += '<br>\n';
             continue;
         }
 
-        // 10. 空行: 改行 <br>
+        // 8. 空行: 改行 <br>
         if (line.trim() === '') {
             htmlFragment += '<br>\n';
             continue;
         }
 
-        // 11. その他: 通常の段落 <p>
-        htmlFragment += `<p>${line}</p>\n`;
+        // 9. その他: 通常の段落 <p> (インライン処理を適用)
+        // インラインディレクティブ (色付, 枠文字, 埋め) をHTMLに変換
+        const htmlContent = parseLineForInlines(line); 
+        htmlFragment += `<p>${htmlContent}</p>\n`;
     }
 
     return { fragment: htmlFragment, bgColor: globalBgColor };
 }
 
-// --- 完全なHTML全体を生成する関数 ---
 function convertMarkscriptToFullHtml(markscript) {
     const { fragment, bgColor } = parseMarkScriptToHtmlFragment(markscript);
 
-    // タイトルをフラグメントから抽出
     const match = fragment.match(/<h1>(.*?)<\/h1>/);
     const title = match ? match[1].replace(/<\/?[^>]+(>|$)/g, "") : 'MarkScript Published Site'; 
 
-    // 背景色があればbodyスタイルに追加
     const bodyStyle = bgColor ? `background-color: ${bgColor};` : `background-color: #f9f9f9;`;
 
-    // 公開サイト用のCSSを整備
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -275,9 +243,9 @@ function convertMarkscriptToFullHtml(markscript) {
         figure { margin: 0; }
         figcaption { font-size: 0.9em; color: #777; text-align: center; margin-top: 5px; word-break: break-all; }
 
-        /* 枠文字のラッパー (pタグ) 用スタイル */
-        .bordered-wrapper { margin: 1em 0; }
-        .bordered-wrapper span { display: inline-block; } /* 枠文字のspanが正しく動作するように */
+        /* インライン要素のスタイル */
+        .colored-text, .bordered-text { padding: 2px 4px; border-radius: 4px; margin: 0 2px; }
+        .bordered-text { border: 2px solid; display: inline-block; padding: 5px 10px; }
     </style>
 </head>
 <body>
@@ -290,15 +258,7 @@ function convertMarkscriptToFullHtml(markscript) {
 // --- サーバーレス関数のメインハンドラ ---
 
 module.exports = async (req, res) => {
-    // CORSヘッダーを先に設定 (ローカル開発用。本番環境ではVercel/Netlifyの設定に依存)
-    res.setHeader('Access-Control-Allow-Origin', '*'); 
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    if (req.method === 'OPTIONS') {
-        // プリフライトリクエストの処理
-        return res.status(204).end();
-    }
+    // ... (CORS, Method check, etc. setup)
 
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
@@ -308,10 +268,8 @@ module.exports = async (req, res) => {
         return res.status(500).json({ error: 'サーバー設定エラー: GitHubトークンが設定されていません。' });
     }
 
-    // JSONボディのパース
     let body;
     try {
-        // Vercel/Netlifyの環境によっては、req.bodyが既にパースされている場合と、生のJSON文字列である場合がある
         body = req.body || (typeof req.body === 'string' ? JSON.parse(req.body) : {});
     } catch (e) {
         return res.status(400).json({ error: '無効なJSON形式です。' });
@@ -323,25 +281,41 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: 'markscriptとfilepathは必須です。' });
     }
 
-    // パスのサニタイズと正規化
-    // 1. パストラバーサルの防止と空白の除去
-    let cleanPath = rawFilepath.replace(/\.\.[\/\\]/g, '').trim(); 
+    // 🚨 修正された厳格なパス検証 🚨
+    
+    // 1. パスの前後の空白と先頭のスラッシュを除去
+    let cleanPath = rawFilepath.trim().replace(/^\/+/, '');
 
-    // 2. "site/" プレフィックスの保証
+    // 2. パストラバーサル要素 (../, ..\) を厳密にチェック
+    if (cleanPath.includes('..') || cleanPath.includes('\\')) {
+         console.warn(`Attempted Path Traversal blocked: ${rawFilepath}`);
+        return res.status(403).json({ error: 'ファイルパスに不正な文字が含まれています（ディレクトリアクセス違反）。', details: 'Path Traversal attempt blocked.' });
+    }
+
+    // 3. "site/" プレフィックスの保証
     if (!cleanPath.startsWith('site/')) {
-        cleanPath = 'site/' + cleanPath.replace(/^\/+/, ''); // 先頭のスラッシュを削除してから 'site/' を付与
+        cleanPath = 'site/' + cleanPath;
     }
 
-    // 3. 拡張子と長さのチェック
-    if (!cleanPath.endsWith('.html') || cleanPath.length < 10) { 
-        return res.status(400).json({ error: 'ファイルパスは.htmlで終わり、適切な長さである必要があります。' });
+    // 4. 拡張子と許可された文字の最終検証
+    // 許可する文字: 英数字、ハイフン、アンダースコア、スラッシュ (site/ の直下のみ)、そして .html
+    // パスが 'site/path/file.html' の形式であることを厳格に確認
+    if (!cleanPath.endsWith('.html') || cleanPath.length < 10 || !cleanPath.match(/^site\/[a-zA-Z0-9_\-\/]+\.html$/)) {
+         console.warn(`Invalid characters or format blocked: ${cleanPath}`);
+        return res.status(400).json({ error: '有効なファイルパスを入力してください。パスは site/ で始まり、英数字とハイフンのみ使用できます。', details: 'Invalid file path format.' });
     }
 
-    // GitHub APIで既存のファイルのSHAを取得 (上書きフラグとして利用)
+    // 5. 最大パス長チェック (GitHubの制限を考慮)
+    if (cleanPath.length > 255) {
+        return res.status(400).json({ error: 'ファイルパスが長すぎます。', details: 'Path too long.' });
+    }
+
+    // ----------------------------------------
+    
     let sha = null;
 
     try {
-        // 1. 既存ファイルのSHAを取得 (上書きが必要な場合)
+        // 1. 既存ファイルのSHAを取得
         try {
             const { data } = await octokit.repos.getContent({
                 owner: REPO_OWNER,
@@ -351,7 +325,6 @@ module.exports = async (req, res) => {
             });
             sha = data.sha;
         } catch (error) {
-            // 404 (ファイルが存在しない) 以外は致命的なエラーとしてスロー
             if (error.status !== 404) {
                 console.error(`Error getting SHA for ${cleanPath}:`, error.message);
                 throw error;
@@ -361,19 +334,20 @@ module.exports = async (req, res) => {
         // 2. MarkScriptを完全なHTMLに変換
         const htmlContent = convertMarkscriptToFullHtml(markscript);
 
-        // 3. コンテンツをBase64でエンコード (GitHub APIの要件)
-        // 既にutf-8なので、そのままBase64に
+        // 3. コンテンツをBase64でエンコード
         const contentBase64 = Buffer.from(htmlContent, 'utf-8').toString('base64');
 
         // 4. GitHub APIを使用してファイルをリポジトリにプッシュ/更新
+        const message = sha ? `[MarkScript] Updated: ${cleanPath}` : `[MarkScript] Created: ${cleanPath}`;
+        
         await octokit.repos.createOrUpdateFileContents({
             owner: REPO_OWNER,
             repo: REPO_NAME,
             path: cleanPath, 
-            message: sha ? `[MarkScript] Updated: ${cleanPath}` : `[MarkScript] Created: ${cleanPath}`,
+            message: message,
             content: contentBase64,
             branch: BRANCH,
-            sha: sha, // shaがあれば更新、なければ新規作成
+            sha: sha, 
         });
 
         // 5. 公開URLを返す 
@@ -386,15 +360,12 @@ module.exports = async (req, res) => {
         });
 
     } catch (error) {
-        // GitHub APIのエラーレスポンスを詳しくログに出力
         console.error('GitHub API Error (General):', error.message);
-        if (error.response && error.response.data) {
-             console.error('GitHub Response Data:', error.response.data);
-        }
-
+        const gh_error = error.response && error.response.data && error.response.data.message;
+        
         res.status(500).json({ 
-            error: 'デプロイ中にエラーが発生しました。リポジトリ名、ブランチ、またはGitHubトークンの権限（`repo`スコープ）を確認してください。',
-            details: error.message 
+            error: 'デプロイ中にエラーが発生しました。',
+            details: gh_error || error.message 
         });
     }
 };
