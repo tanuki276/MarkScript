@@ -73,7 +73,6 @@
     min-height: 100px;
   }
   
-  /* インライン要素の修正のために追加: <p>タグ内のインライン要素が親の行に収まるように */
   #output p { margin: 0 0 1em 0; line-height: 1.6; }
   #output p:last-child { margin-bottom: 0; }
 
@@ -122,7 +121,7 @@
   /* 小文字 */
   .small-text { font-size: 0.85rem; color: #6b7280; margin-bottom: 0.5rem; }
 
-  /* 枠文字のプレビュー用スタイル (インライン要素として機能させる) */
+  /* 枠文字・色付のプレビュー用スタイル (インライン要素として機能させる) */
   .colored-text, .bordered-text {
     padding: 2px 4px; 
     border-radius: 4px;
@@ -131,7 +130,7 @@
 
   .bordered-text { 
     border: 2px solid; 
-    display: inline-block; /* インラインブロックにして枠線の見た目を保つ */
+    display: inline-block; 
     padding: 5px 10px;
   }
 
@@ -139,6 +138,48 @@
   #output img { max-width: 100%; height: auto; display: block; margin: 15px auto; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
   #output figure { margin: 0; }
   #output figcaption { font-size: 0.8em; color: #6b7280; text-align: center; margin-top: 5px; }
+
+
+  /* --- 新規追加構文のスタイル --- */
+  
+  /* ボタン */
+  .action-button {
+    display: inline-block;
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    background: #10b981; 
+    color: white !important;
+    border-radius: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 0.2s, transform 0.1s;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin: 10px 0;
+  }
+  .action-button:hover {
+    background: #059669;
+    transform: translateY(-1px);
+  }
+
+  /* ボックス (alert-box) */
+  .alert-box {
+    margin: 15px 0;
+    padding: 10px 15px;
+    border-radius: 6px;
+    font-weight: 500;
+  }
+  
+  /* インラインコード */
+  code {
+    background: #e5e7eb;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9em;
+    color: #1f2937;
+  }
+
 
   /* ダークモードスタイル */
   body.dark { background:#1f2937; color:#e5e7eb; }
@@ -151,6 +192,8 @@
   body.dark h3 { color: #d1d5db; }
   body.dark .small-text { color: #9ca3af; }
   body.dark #modeToggle { background: #f3f4f6; color: #1f2937; }
+  body.dark code { background: #4b5563; color: #f3f4f6; }
+
 
   @media (max-width:640px) { 
     body { padding: 10px; }
@@ -171,11 +214,15 @@
   ・<code>大 </code>：中見出し（h3）<br />
   ・**<code>小 テキスト</code>**：文字を小さく表示<br />
   ・**<code>コピー テキスト</code>**：コピーボタン付きのテキスト<br />
-  ・<code>埋め URL テキスト</code>：リンク (インライン、http/https のみ)<br />
   <hr>
   ・**<code>背景 (色名/HEX)</code>**：コンテンツの背景色を設定（最初の行のみ有効）<br />
   ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け (**インライン**) <br />
   ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける (**インライン**) <br />
+  ・`コード`：インラインコード (**インライン**) <br />
+  ・<code>埋め URL テキスト</code>：リンク (**インライン**) <br />
+  <hr>
+  ・**<code>ボタン URL テキスト</code>**：リンク付きボタン<br />
+  ・**<code>ボックス (色名/HEX) テキスト</code>**：色付きブロック要素<br />
   ・**<code>引用 URL</code>**：画像を引用表示<br />
   ・**<code>改行</code>**：強制改行 (<code>&lt;br&gt;</code>) <br />
   ・空行：改行 (<code>&lt;br&gt;</code>) <br />
@@ -200,7 +247,6 @@
 (function(){
   'use strict';
 
-  // --- 設定/制限 ---
   const CONFIG = {
     MAX_INPUT_CHARS: 20000,
     MAX_LINE_CHARS: 2000,
@@ -213,7 +259,6 @@
     GENERIC_ERROR_MESSAGE: '[エラーが発生しました。入力形式を確認してください。]',
   };
 
-  // サーバーサイドと同期済みのカラーマップ
   const COLOR_MAP = {
       '赤': 'red',
       '青': 'blue',
@@ -335,15 +380,22 @@
   // --- MarkScriptパーサーのためのヘルパー関数（インライン機能修正版） ---
 
   /**
-   * インラインディレクティブ（色付, 枠文字, 埋め）をHTML文字列に変換する
+   * インラインディレクティブ（色付, 枠文字, 埋め, コード）をHTML文字列に変換する
    * @param {string} text - 処理するテキスト行
    * @returns {string} HTML文字列に置換されたテキスト
    */
   function parseLineForInlines(text) {
     let result = text;
     
-    // 1. 埋め (リンク) の処理
-    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=\s*埋め|\s*色付|\s*枠文字|$)/g, (match, url, linkText) => {
+    // 1. コード (インラインコード `...`) の処理
+    // 注: バッククォートの中にバッククォートがある場合は対応していません
+    result = result.replace(/`([^`]+)`/g, (match, content) => {
+        const safeContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<code>${safeContent}</code>`;
+    });
+
+    // 2. 埋め (リンク) の処理
+    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=(?:\s*埋め|\s*色付|\s*枠文字|\s*$|`))/g, (match, url, linkText) => {
         const safeUrl = validateAndNormalizeUrl(url);
         const display = (linkText || url || '').trim();
 
@@ -353,8 +405,8 @@
         return `[無効なURL: ${url}]`; 
     });
 
-    // 2. 色付 / 枠文字 の処理
-    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$))/g;
+    // 3. 色付 / 枠文字 の処理
+    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$|`))/g;
 
     result = result.replace(inlineRegex, (match, type, rawColor, content) => {
         const color = normalizeColor(rawColor.trim());
@@ -438,8 +490,58 @@
         nodes.appendChild(createCopyBox(line.slice(4).trim()));
         consumed = true;
       }
+      
+      // 6. ボタン
+      else if (line.startsWith('ボタン ')) {
+        const parts = line.slice(4).trim().split(/\s+/);
+        const rawUrl = parts[0];
+        const text = parts.slice(1).join(' ').trim() || 'ボタン';
+        const safeUrl = validateAndNormalizeUrl(rawUrl);
 
-      // 6. 引用 (画像)
+        if (safeUrl) {
+            const a = document.createElement('a');
+            a.href = safeUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'action-button'; 
+            appendTextNode(a, text);
+            nodes.appendChild(a);
+        } else {
+            nodes.appendChild(createMessage(`[無効なボタンURL: ${rawUrl}]`, 'red', true));
+        }
+        consumed = true;
+      }
+
+      // 7. ボックス (色付きブロック)
+      else if (line.startsWith('ボックス ')) {
+        const match = line.match(/^ボックス\s+\(([^)]+)\)\s*(.*)/);
+        if (match) {
+            const rawColor = match[1].trim();
+            const content = match[2].trim();
+            const color = normalizeColor(rawColor);
+            
+            if (color) {
+                const div = document.createElement('div');
+                div.className = 'alert-box';
+                div.style.backgroundColor = color;
+                // 白、黄、透明に近い色の場合に文字色を暗くする
+                if (color === 'white' || color === '#ffffff' || color === 'yellow') {
+                    div.style.color = '#1f2937';
+                } else {
+                    div.style.color = 'white';
+                }
+                
+                // ボックス内の内容にもインライン解析を適用
+                div.innerHTML = parseLineForInlines(content); 
+                nodes.appendChild(div);
+            } else {
+                nodes.appendChild(createMessage(`[無効な色: ${rawColor}]`, 'red', true));
+            }
+        }
+        consumed = true;
+      }
+
+      // 8. 引用 (画像)
       else if (line.startsWith('引用 ')) {
         const rawUrl = line.slice(3).trim().split(/\s+/)[0];
         const safe = validateAndNormalizeUrl(rawUrl);
@@ -459,21 +561,21 @@
         consumed = true;
       }
 
-      // 7. 改行コマンド <br>
+      // 9. 改行コマンド <br>
       else if (line.startsWith('改行')) {
           nodes.appendChild(document.createElement('br'));
           consumed = true;
       }
 
-      // 8. 空行: 改行 <br> (既存の動作維持)
+      // 10. 空行: 改行 <br>
       else if (lineTrimmed === '') {
         nodes.appendChild(document.createElement('br'));
         consumed = true;
       }
 
-      // 9. その他: 通常の段落 <p> (インライン処理を適用)
+      // 11. その他: 通常の段落 <p> (インライン処理を適用)
       if (!consumed) {
-        // インラインディレクティブ (色付, 枠文字, 埋め) をHTMLに変換
+        // インラインディレクティブ (色付, 枠文字, 埋め, コード) をHTMLに変換
         const htmlContent = parseLineForInlines(line); 
 
         // 結果のHTML文字列を安全にDOMノードに変換して段落に追加
@@ -543,8 +645,6 @@
         return;
     }
 
-    // ⚠️ クライアント側のパス検証 (サーバー側で厳格に再検証されます)
-    // ユーザーが 'mypage.html' のようにファイル名だけを入力した場合に対応
     if (!path.includes('/')) {
         path = 'site/' + path;
     } else {
@@ -555,7 +655,6 @@
         }
     }
 
-    // 有効なファイルパス形式のチェック（必須: .html、../ 禁止を簡易チェック）
     if (!path.endsWith('.html') || path.includes('..')) {
         alert('無効なファイルパスです。ファイルパスは .html で終わる必要があり、".."(上位ディレクトリ)へのアクセスは禁止されています。');
         return;
