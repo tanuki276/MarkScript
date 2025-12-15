@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<title>MarkScript Viewer — 拡張版</title>
+<title>MarkScript</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
 <style>
@@ -72,7 +72,7 @@
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
     min-height: 100px;
   }
-  
+
   #output p { margin: 0 0 1em 0; line-height: 1.6; }
   #output p:last-child { margin-bottom: 0; }
 
@@ -141,7 +141,7 @@
 
 
   /* --- 新規追加構文のスタイル --- */
-  
+
   /* ボタン */
   .action-button {
     display: inline-block;
@@ -169,7 +169,7 @@
     border-radius: 6px;
     font-weight: 500;
   }
-  
+
   /* インラインコード */
   code {
     background: #e5e7eb;
@@ -206,7 +206,7 @@
 </style>
 </head>
 <body>
-<h1>MarkScript Viewer — 拡張版</h1>
+<h1>MarkScript Viewer — 拡張版 (XSS対策済み)</h1>
 
 <div id="manual">
   <strong>■ MarkScript（拡張機能）：</strong><br />
@@ -219,7 +219,7 @@
   ・**<code>色付 (色名/HEX) テキスト</code>**：テキストに色付け (**インライン**) <br />
   ・**<code>枠文字 (色名/HEX) テキスト</code>**：文字の周りに枠線を付ける (**インライン**) <br />
   ・`コード`：インラインコード (**インライン**) <br />
-  ・<code>埋め URL テキスト</code>：リンク (**インライン**) <br />
+  ・**<code>埋め URL テキスト</code>**：リンク (**インライン**) <br />
   <hr>
   ・**<code>ボタン URL テキスト</code>**：リンク付きボタン<br />
   ・**<code>ボックス (色名/HEX) テキスト</code>**：色付きブロック要素<br />
@@ -242,7 +242,6 @@
 <div id="output" aria-live="polite"></div>
 
 <div id="modeToggle" role="button" aria-pressed="false">ダークモード</div>
-
 <script>
 (function(){
   'use strict';
@@ -356,10 +355,10 @@
 
     const span = document.createElement('span');
     appendTextNode(span, text);
-    
+
     const button = document.createElement('button');
     appendTextNode(button, 'コピー');
-    
+
     button.addEventListener('click', async () => {
         const success = await writeToClipboard(text);
         button.textContent = success ? 'コピー完了!' : '失敗';
@@ -371,33 +370,29 @@
     return div;
   }
 
-  function createParagraph(text) {
-    const p = document.createElement('p');
-    appendTextNode(p, text);
-    return p;
-  }
-
-  // --- MarkScriptパーサーのためのヘルパー関数（インライン機能修正版） ---
-
   /**
    * インラインディレクティブ（色付, 枠文字, 埋め, コード）をHTML文字列に変換する
+   * XSS対策として、ディレクティブ内のコンテンツはすべてエスケープされるように修正。
    * @param {string} text - 処理するテキスト行
    * @returns {string} HTML文字列に置換されたテキスト
    */
   function parseLineForInlines(text) {
-    let result = text;
-    
-    // 1. コード (インラインコード `...`) の処理
-    // 注: バッククォートの中にバッククォートがある場合は対応していません
+    // 1. 最初のステップで、ユーザーが入力したHTMLタグ('<', '>')をすべて一時的な記号に置き換えて無害化する。
+    //    これにより、ディレクティブとして処理されない生のHTMLタグは、すべてテキストとして扱われる。
+    let result = text.replace(/</g, '__LT__').replace(/>/g, '__GT__');
+
+    // 2. コード (インラインコード `...`) の処理
     result = result.replace(/`([^`]+)`/g, (match, content) => {
-        const safeContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // エスケープ記号をHTMLエンティティ(&lt; &gt;)に戻し、コードタグを生成
+        const safeContent = content.replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
         return `<code>${safeContent}</code>`;
     });
 
-    // 2. 埋め (リンク) の処理
+    // 3. 埋め (リンク) の処理
     result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=(?:\s*埋め|\s*色付|\s*枠文字|\s*$|`))/g, (match, url, linkText) => {
         const safeUrl = validateAndNormalizeUrl(url);
-        const display = (linkText || url || '').trim();
+        // リンクテキストもエスケープされた記号をHTMLエンティティに戻す
+        const display = (linkText || url || '').trim().replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
 
         if (safeUrl) {
             return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${display}</a>`;
@@ -405,12 +400,13 @@
         return `[無効なURL: ${url}]`; 
     });
 
-    // 3. 色付 / 枠文字 の処理
+    // 4. 色付 / 枠文字 の処理
     const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$|`))/g;
 
     result = result.replace(inlineRegex, (match, type, rawColor, content) => {
         const color = normalizeColor(rawColor.trim());
-        const contentTrimmed = content.trim();
+        // コンテンツもエスケープされた記号をHTMLエンティティに戻す
+        const contentTrimmed = content.trim().replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
 
         if (!color) return `[無効な色: ${rawColor}]`; 
 
@@ -428,6 +424,9 @@
 
         return `<span class="${className}" style="${style}">${contentTrimmed}</span>`;
     });
+
+    // 5. 最後に、ディレクティブによってHTMLタグに変換されなかった部分に残ったエスケープ記号をHTMLエンティティに戻す。
+    result = result.replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
 
     return result;
   }
@@ -460,23 +459,19 @@
       isFirstLine = false;
       if (consumed) continue;
 
-      // 2. タイトル
+      // 2-5. タイトル, 大, 小, コピー (安全な appendTextNode を使用)
       if (line.startsWith('タイトル ')) {
         const h1 = document.createElement('h1');
         appendTextNode(h1, line.slice(4).trim());
         nodes.appendChild(h1);
         consumed = true;
       }
-
-      // 3. 大
       else if (line.startsWith('大 ')) {
         const h3 = document.createElement('h3');
         appendTextNode(h3, line.slice(2).trim());
         nodes.appendChild(h3);
         consumed = true;
       }
-
-      // 4. 小 (文字を小さくする)
       else if (line.startsWith('小 ')) {
         const p = document.createElement('p');
         p.className = 'small-text';
@@ -484,13 +479,11 @@
         nodes.appendChild(p);
         consumed = true;
       }
-
-      // 5. コピー (コピーボタン付き)
       else if (line.startsWith('コピー ')) {
         nodes.appendChild(createCopyBox(line.slice(4).trim()));
         consumed = true;
       }
-      
+
       // 6. ボタン
       else if (line.startsWith('ボタン ')) {
         const parts = line.slice(4).trim().split(/\s+/);
@@ -519,20 +512,20 @@
             const rawColor = match[1].trim();
             const content = match[2].trim();
             const color = normalizeColor(rawColor);
-            
+
             if (color) {
                 const div = document.createElement('div');
                 div.className = 'alert-box';
                 div.style.backgroundColor = color;
-                // 白、黄、透明に近い色の場合に文字色を暗くする
                 if (color === 'white' || color === '#ffffff' || color === 'yellow') {
                     div.style.color = '#1f2937';
                 } else {
                     div.style.color = 'white';
                 }
-                
-                // ボックス内の内容にもインライン解析を適用
-                div.innerHTML = parseLineForInlines(content); 
+
+                const htmlContent = parseLineForInlines(content); 
+                // XSS対策により、htmlContentに含まれるのは許可されたタグとエスケープされたテキストのみ
+                div.innerHTML = htmlContent; 
                 nodes.appendChild(div);
             } else {
                 nodes.appendChild(createMessage(`[無効な色: ${rawColor}]`, 'red', true));
@@ -561,26 +554,27 @@
         consumed = true;
       }
 
-      // 9. 改行コマンド <br>
-      else if (line.startsWith('改行')) {
+      // 9. 改行 / 10. 空行
+      else if (line.startsWith('改行') || lineTrimmed === '') {
           nodes.appendChild(document.createElement('br'));
           consumed = true;
       }
 
-      // 10. 空行: 改行 <br>
-      else if (lineTrimmed === '') {
-        nodes.appendChild(document.createElement('br'));
-        consumed = true;
-      }
-
       // 11. その他: 通常の段落 <p> (インライン処理を適用)
-      if (!consumed) {
-        // インラインディレクティブ (色付, 枠文字, 埋め, コード) をHTMLに変換
+      else {
+        // XSS対策: parseLineForInlinesにより、生きたHTMLタグは &lt; &gt; に変換されている。
         const htmlContent = parseLineForInlines(line); 
 
-        // 結果のHTML文字列を安全にDOMノードに変換して段落に追加
         const p = document.createElement('p');
-        p.innerHTML = htmlContent; 
+        const tempContainer = document.createElement('div');
+        
+        // innerHTMLを使ってHTML文字列をノードに変換
+        tempContainer.innerHTML = htmlContent; 
+        
+        // 子ノードを安全に移動
+        while(tempContainer.firstChild) {
+            p.appendChild(tempContainer.firstChild);
+        }
         nodes.appendChild(p);
       }
     }
@@ -616,11 +610,10 @@
       return;
     }
 
-    // 以前の出力内容をクリア
     while (outputEl.firstChild) {
       outputEl.removeChild(outputEl.firstChild);
     }
-    
+
     try {
       const fragment = parseMarkScriptToNodes(input);
       outputEl.appendChild(fragment);
@@ -630,7 +623,7 @@
     }
   });
 
-  // 自動公開実行 (パス検証と /site フォルダ限定のロジック)
+  // 自動公開実行
   publishBtn.addEventListener('click', async () => {
     const markscript = inputEl.value;
     let path = publishPathEl.value.trim();
@@ -659,7 +652,7 @@
         alert('無効なファイルパスです。ファイルパスは .html で終わる必要があり、".."(上位ディレクトリ)へのアクセスは禁止されています。');
         return;
     }
-    
+
     if (!checkRateLimit()) return;
 
     publishBtn.disabled = true;
@@ -722,5 +715,6 @@
 
 })();
 </script>
+
 </body>
 </html>
