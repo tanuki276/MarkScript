@@ -90,21 +90,21 @@ function normalizeColor(input) {
 
 // MarkScriptパーサーのためのヘルパー関数（インライン機能修正版をサーバーサイド向けに調整）
 function parseLineForInlines(text) {
-    let result = text;
+    // 最初にすべての < と > を一時的な記号に置き換え、生のHTMLタグをすべて無害化する
+    let result = text.replace(/</g, '__LT__').replace(/>/g, '__GT__');
     
     // 1. コード (インラインコード `...`) の処理
     result = result.replace(/`([^`]+)`/g, (match, content) => {
-        // インラインコードの内容はHTMLエスケープが必要
-        const safeContent = escapeHtml(content);
+        // エスケープ記号をHTMLエンティティ(&lt; &gt;)に戻し、コードタグを生成
+        const safeContent = content.replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
         return `<code>${safeContent}</code>`;
     });
 
     // 2. 埋め (リンク) の処理
-    // 注: ` `コード` ` の処理が先に行われているため、正規表現から `|` を除外
-    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=\s*埋め|\s*色付|\s*枠文字|$)/g, (match, url, linkText) => {
+    result = result.replace(/埋め\s+(https?:\/\/[^\s]+)(?:\s+(.*?))?(?=(?:\s*埋め|\s*色付|\s*枠文字|\s*$|`))/g, (match, url, linkText) => {
         const safeUrl = validateAndNormalizeUrl(url);
-        // HTMLエスケープを適用
-        const display = escapeHtml((linkText || url || '').trim());
+        // リンクテキストもエスケープされた記号をHTMLエンティティに戻す
+        const display = (linkText || url || '').trim().replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
 
         if (safeUrl) {
             return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${display}</a>`;
@@ -113,12 +113,12 @@ function parseLineForInlines(text) {
     });
 
     // 3. 色付 / 枠文字 の処理
-    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$))/g;
+    const inlineRegex = /(色付|枠文字)\s*\(([^)]+)\)\s*(.*?)(?=(?:色付|枠文字|埋め|\s*$|`))/g;
 
     result = result.replace(inlineRegex, (match, type, rawColor, content) => {
         const color = normalizeColor(rawColor.trim());
-        // HTMLエスケープを適用
-        const contentTrimmed = escapeHtml(content.trim());
+        // コンテンツもエスケープされた記号をHTMLエンティティに戻す
+        const contentTrimmed = content.trim().replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
 
         if (!color) return `[無効な色: ${escapeHtml(rawColor)}]`; 
 
@@ -128,32 +128,22 @@ function parseLineForInlines(text) {
 
         if (isBorder) {
             className = 'bordered-text';
-            // style属性の値はクリーンであることを保証 (colorは既にnormalizeColorで検証済み)
             style = `border-color: ${color}; color: ${color};`;
         } else {
             className = 'colored-text';
             style = `color: ${color};`;
         }
-        
-        // **重要**: 上記の正規表現では、処理されなかったインラインコード(`...`)のタグが残っている可能性があるため、
-        // contentTrimmedに対して、インラインコードのタグを元に戻す処理を適用する必要がある。
-        // 今回は、インラインコードを最初に処理しているため、`<code>...</code>`タグはそのまま残っている前提。
 
         return `<span class="${className}" style="${style}">${contentTrimmed}</span>`;
     });
 
-    // インライン処理後の残りのテキストを**再度**エスケープし、意図的に残したタグを元に戻す
-    // ただし、MarkScriptでは基本的に残りのテキストは全てコンテンツとして解釈されるため、
-    // 最初のコードブロックとリンク処理が残りのテキストを正しくエスケープした後に実行されるため、
-    // ここで複雑な逆エスケープは避ける。代わりに、未処理の残りのテキストは全てエスケープされていることを保証する。
-    
-    // リンクやspanタグは既にHTMLとして生成されているため、再度エスケープを適用してはならない。
-    // そのため、処理されていないテキスト部分のみをエスケープする必要があるが、それは困難なため、
-    // シンプルに、最初の処理でエスケープ済みのテキストをそのまま返す。
-    // （元のコードの複雑なエスケープロジックは削除し、個々の構文処理でescapeHtmlを使用する）
+    // 4. 最後に、ディレクティブによってHTMLタグに変換されなかった部分に残ったエスケープ記号をHTMLエンティティに戻す。
+    //    これで、生の < や > はすべて &lt; &gt; になり、XSSを防ぐ。
+    result = result.replace(/__LT__/g, '&lt;').replace(/__GT__/g, '&gt;');
+
     return result; 
 }
-
+// --- MarkScriptパーサー（全体） ---
 
 function parseMarkScriptToHtmlFragment(text) {
     const lines = text.split(/\r?\n/).slice(0, 2000); 
@@ -182,7 +172,6 @@ function parseMarkScriptToHtmlFragment(text) {
 
         // 2. タイトル
         if (line.startsWith('タイトル ')) {
-            // テキストを安全に挿入するためエスケープ
             const textPart = escapeHtml(line.slice(4).trim());
             htmlFragment += `<h1>${textPart}</h1>\n`;
             continue;
@@ -209,7 +198,7 @@ function parseMarkScriptToHtmlFragment(text) {
             htmlFragment += `<div class="code-box"><pre><code>${content}</code></pre></div>\n`;
             continue;
         }
-        
+
         // 6. ボタン (新規)
         if (line.startsWith('ボタン ')) {
             const parts = line.slice(4).trim().split(/\s+/);
@@ -237,10 +226,10 @@ function parseMarkScriptToHtmlFragment(text) {
                 if (color) {
                     const isDarkBackground = (color !== 'white' && color !== '#ffffff' && color !== 'yellow' && !/rgba?\(255, 255, 255/.test(color));
                     const textColor = isDarkBackground ? 'white' : '#1f2937';
-                    
-                    // ボックス内の内容にもインライン解析を適用
+
+                    // ボックス内の内容にもインライン解析を適用 (XSS対策済み)
                     const htmlContent = parseLineForInlines(content); 
-                    
+
                     htmlFragment += `<div class="alert-box" style="background-color: ${color}; color: ${textColor};">${htmlContent}</div>\n`;
 
                 } else {
@@ -257,7 +246,6 @@ function parseMarkScriptToHtmlFragment(text) {
 
             if (safeUrl) {
                 const altText = `引用画像: ${safeUrl}`;
-                // URLはそのまま、altテキストはエスケープ
                 htmlFragment += `<figure><img src="${safeUrl}" alt="${escapeHtml(altText)}"><figcaption>${escapeHtml(safeUrl)}</figcaption></figure>\n`;
             } else {
                 htmlFragment += `<p>[無効な画像URL: ${escapeHtml(rawUrl)} - 画像がブロックされました]</p>\n`;
@@ -278,6 +266,7 @@ function parseMarkScriptToHtmlFragment(text) {
         }
 
         // 11. その他: 通常の段落 <p> (インライン処理を適用)
+        // parseLineForInlinesの修正により、生のHTMLタグはエスケープされるため安全
         const htmlContent = parseLineForInlines(line); 
         htmlFragment += `<p>${htmlContent}</p>\n`;
     }
@@ -338,7 +327,7 @@ function convertMarkscriptToFullHtml(markscript) {
             transition: background-color 0.2s, transform 0.1s;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             margin: 10px 0;
-            line-height: 1; /* ボタン内の行の高さを調整 */
+            line-height: 1;
         }
         .action-button:hover { background: #059669; }
 
@@ -349,7 +338,7 @@ function convertMarkscriptToFullHtml(markscript) {
             border-radius: 6px;
             font-weight: 500;
         }
-        .alert-box a { color: inherit; text-decoration: underline; } /* ボックス内のリンクはテキスト色に合わせる */
+        .alert-box a { color: inherit; text-decoration: underline; }
         
         /* リンクの基本スタイル */
         a { color: #0645ad; text-decoration: none; border-bottom: 1px dashed #0645ad50; }
@@ -366,10 +355,7 @@ function convertMarkscriptToFullHtml(markscript) {
 // --- サーバーレス関数のメインハンドラ ---
 
 module.exports = async (req, res) => {
-    // ... (CORS, Method check, etc. setup)
-
     if (req.method !== 'POST') {
-        // Vercel/Netlify FunctionsではCORS設定が追加で必要になる場合があるが、ここでは省略
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
@@ -379,7 +365,6 @@ module.exports = async (req, res) => {
 
     let body;
     try {
-        // req.bodyが文字列の場合の対応
         body = req.body || (typeof req.body === 'string' ? JSON.parse(req.body) : {});
     } catch (e) {
         return res.status(400).json({ error: '無効なJSON形式です。' });
@@ -391,29 +376,24 @@ module.exports = async (req, res) => {
         return res.status(400).json({ error: 'markscriptとfilepathは必須です。' });
     }
 
-    // 🚨 修正された厳格なパス検証 🚨
+    // 🚨 厳格なパス検証 🚨
     let cleanPath = rawFilepath.trim().replace(/^\/+/, '');
 
-    // 1. パストラバーサル要素 (../, ..\) を厳密にチェック
     if (cleanPath.includes('..') || cleanPath.includes('\\')) {
          console.warn(`Attempted Path Traversal blocked: ${rawFilepath}`);
         return res.status(403).json({ error: 'ファイルパスに不正な文字が含まれています（ディレクトリアクセス違反）。', details: 'Path Traversal attempt blocked.' });
     }
 
-    // 2. "site/" プレフィックスの保証
     if (!cleanPath.startsWith('site/')) {
         cleanPath = 'site/' + cleanPath;
     }
 
-    // 3. 拡張子と許可された文字の最終検証
-    // 許可する文字: 英数字、ハイフン、アンダースコア、スラッシュ、ピリオド
     const pathRegex = /^site\/[a-zA-Z0-9_\-\/]+\.html$/;
     if (!cleanPath.endsWith('.html') || !cleanPath.match(pathRegex)) {
          console.warn(`Invalid characters or format blocked: ${cleanPath}`);
         return res.status(400).json({ error: '有効なファイルパスを入力してください。パスは site/ で始まり、英数字、ハイフン、アンダースコアのみ使用できます。', details: 'Invalid file path format.' });
     }
 
-    // 4. 最大パス長チェック
     if (cleanPath.length > 255) {
         return res.status(400).json({ error: 'ファイルパスが長すぎます。', details: 'Path too long.' });
     }
@@ -423,7 +403,7 @@ module.exports = async (req, res) => {
     let sha = null;
 
     try {
-        // 1. 既存ファイルのSHAを取得 (ファイルが存在しない場合は404エラー)
+        // 1. 既存ファイルのSHAを取得 
         try {
             const { data } = await octokit.repos.getContent({
                 owner: REPO_OWNER,
